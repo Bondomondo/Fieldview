@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FieldView — Farm Field Mapper</title>
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- JSZip for KMZ extraction -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+  <!-- toGeoJSON for KML → GeoJSON -->
+  <script src="https://cdn.jsdelivr.net/npm/@mapbox/togeojson@0.16.0/togeojson.js"></script>
+
+  <!-- Turf.js for bbox/centroid calculations -->
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ── Top Bar ─────────────────────────────────────────────────── -->
+<header class="topbar">
+  <div class="topbar-brand">
+    <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+      <polyline points="9 22 9 12 15 12 15 22"/>
+    </svg>
+    <span class="brand-name">FieldView</span>
+    <span class="brand-tagline">Farm Field Mapper</span>
+  </div>
+  <div class="topbar-actions">
+    <button class="btn btn-ghost" id="btn-toggle-sidebar" title="Toggle sidebar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+    <button class="btn btn-ghost" id="btn-fit-all" title="Fit all layers">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+    </button>
+  </div>
+</header>
+
+<!-- ── Layout ──────────────────────────────────────────────────── -->
+<div class="app-layout">
+
+  <!-- ── Sidebar ──────────────────────────────────────────────── -->
+  <aside class="sidebar" id="sidebar">
+
+    <!-- KMZ Upload Panel -->
+    <section class="panel">
+      <div class="panel-header">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+        <h2>Land Boundaries</h2>
+      </div>
+      <div class="panel-body">
+        <div class="drop-zone" id="drop-zone">
+          <div class="drop-zone-inner">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            <p>Drop KMZ file here</p>
+            <span>or</span>
+            <label class="btn btn-primary btn-sm" for="file-input">Browse file</label>
+            <input type="file" id="file-input" accept=".kmz,.kml" hidden />
+          </div>
+        </div>
+        <div class="uploaded-files" id="uploaded-files"></div>
+      </div>
+    </section>
+
+    <!-- WFS Data Panel -->
+    <section class="panel">
+      <div class="panel-header">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        <h2>WFS Data Layers</h2>
+      </div>
+      <div class="panel-body">
+        <div class="input-group">
+          <label for="wfs-url">WFS Service URL</label>
+          <div class="input-row">
+            <input
+              type="url"
+              id="wfs-url"
+              placeholder="https://epub.sjv.se/inspire/opendata/wfs"
+              value="https://epub.sjv.se/inspire/opendata/wfs"
+            />
+            <button class="btn btn-primary" id="btn-load-caps" title="Load capabilities">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.2"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div id="caps-status" class="status-msg" hidden></div>
+
+        <div id="layer-selector-wrap" hidden>
+          <div class="input-group">
+            <label for="layer-select">Available Layers</label>
+            <div class="select-wrapper">
+              <select id="layer-select" size="1"></select>
+            </div>
+          </div>
+          <div class="input-row mt-2">
+            <div class="input-group" style="flex:1;margin-bottom:0">
+              <label for="feature-limit">Max features</label>
+              <input type="number" id="feature-limit" value="2000" min="10" max="50000" step="100" />
+            </div>
+            <button class="btn btn-accent" id="btn-add-layer" style="align-self:flex-end">
+              Add Layer
+            </button>
+          </div>
+          <div id="layer-description" class="layer-description" hidden></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Active Layers Panel -->
+    <section class="panel panel-layers">
+      <div class="panel-header">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+        <h2>Active Layers</h2>
+        <span class="layer-count" id="layer-count">0</span>
+      </div>
+      <div class="panel-body">
+        <ul class="layer-list" id="layer-list">
+          <li class="layer-list-empty">No layers loaded yet</li>
+        </ul>
+      </div>
+    </section>
+
+  </aside>
+
+  <!-- ── Map Area ──────────────────────────────────────────────── -->
+  <main class="map-container">
+    <div id="map"></div>
+
+    <!-- Basemap switcher -->
+    <div class="basemap-switcher" id="basemap-switcher">
+      <button class="basemap-btn active" data-basemap="osm" title="OpenStreetMap">Map</button>
+      <button class="basemap-btn" data-basemap="satellite" title="Satellite">Satellite</button>
+      <button class="basemap-btn" data-basemap="topo" title="Topographic">Topo</button>
+    </div>
+
+    <!-- Feature info popup (inside map) -->
+    <div class="feature-info-panel" id="feature-info" hidden>
+      <div class="feature-info-header">
+        <strong id="feature-info-title">Feature Properties</strong>
+        <button class="btn-close" id="close-feature-info">✕</button>
+      </div>
+      <div class="feature-info-body" id="feature-info-body"></div>
+    </div>
+
+    <!-- Loading overlay -->
+    <div class="loading-overlay" id="loading-overlay" hidden>
+      <div class="spinner"></div>
+      <span id="loading-text">Loading…</span>
+    </div>
+  </main>
+
+</div>
+
+<!-- Toast container -->
+<div class="toast-container" id="toast-container"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
