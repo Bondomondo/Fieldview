@@ -391,7 +391,7 @@ async function loadCapabilities() {
   const capsUrl = buildCapsUrl(rawUrl);
 
   try {
-    const resp = await fetch(proxied(capsUrl));
+    const resp = await fetchWithTimeout(proxied(capsUrl));
     if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
     parseCapsXml(await resp.text(), rawUrl);
   } catch (err) {
@@ -417,14 +417,21 @@ function parseCapsXml(xmlText, baseUrl) {
     return;
   }
 
-  const featureTypes = Array.from(doc.querySelectorAll('FeatureType'));
+  // querySelectorAll ignores namespace prefixes; use local-name matching via XPath-style
+  // fallback so we handle both wfs:FeatureType and plain FeatureType.
+  let featureTypes = Array.from(doc.querySelectorAll('FeatureType'));
+  if (!featureTypes.length) {
+    // Try namespace-aware lookup
+    featureTypes = Array.from(doc.getElementsByTagNameNS('*', 'FeatureType'));
+  }
   if (!featureTypes.length) {
     setStatus('caps-status', 'No layers found in this WFS service', 'error');
     return;
   }
 
   state.capsLayers = featureTypes.map(ft => {
-    const getText = sel => ft.querySelector(sel)?.textContent?.trim() ?? '';
+    // getElementsByTagNameNS('*', tag) works regardless of prefix
+    const getText = tag => ft.getElementsByTagNameNS('*', tag)[0]?.textContent?.trim() ?? '';
     return {
       name:     getText('Name'),
       title:    getText('Title'),
@@ -501,10 +508,12 @@ async function loadWfsLayer() {
   }
 }
 
-// Build BBOX string from current map view (WGS84 lon/lat order for CRS84)
+// Build BBOX string from current map view.
+// SRSNAME=CRS84 → lon,lat order; the BBOX coordinates must match.
 function getViewportBbox() {
   const b = map.getBounds();
   const w = b.getWest(), s = b.getSouth(), e = b.getEast(), n = b.getNorth();
+  // CRS84 axis order: lon,lat
   return `${w},${s},${e},${n},urn:ogc:def:crs:OGC::CRS84`;
 }
 
@@ -514,24 +523,51 @@ function buildFeatureUrl(baseUrl, typeName, limit) {
   url.searchParams.set('request', 'GetFeature');
   url.searchParams.set('typeName', typeName);
   url.searchParams.set('outputFormat', 'application/json');
+  // SRSNAME forces the server to reproject to WGS84 lon/lat regardless of
+  // the layer's native CRS (e.g. SWEREF99TM / EPSG:3006 for Swedish data).
+  url.searchParams.set('SRSNAME', 'urn:ogc:def:crs:OGC::CRS84');
   url.searchParams.set('count', String(limit));
   url.searchParams.set('maxFeatures', String(limit));  // WFS 1.x compat
   url.searchParams.set('BBOX', getViewportBbox());
   return url.toString();
 }
 
+// Fetch with a hard timeout so the loading overlay can never get stuck.
+async function fetchWithTimeout(url, timeoutMs = 30000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('Request timed out after 30 s');
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchWfsFeatures(wfsConfig) {
   const { baseUrl, typeName, limit } = wfsConfig;
   const url  = buildFeatureUrl(baseUrl, typeName, limit);
-  const resp = await fetch(proxied(url));
+  const resp = await fetchWithTimeout(proxied(url));
   if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
 
-  const ct = resp.headers.get('content-type') || '';
-  if (ct.includes('json')) {
-    const geojson = await resp.json();
-    if (!geojson?.features) throw new Error('Unexpected JSON response');
-    return geojson;
+  const body = await resp.text();
+
+  // Try JSON first (regardless of content-type — some servers lie)
+  try {
+    const geojson = JSON.parse(body);
+    if (geojson?.features) return geojson;
+    // WFS exception wrapped in JSON
+    if (geojson?.exceptions || geojson?.code)
+      throw new Error(geojson.exceptions?.[0]?.text || geojson.message || 'WFS exception');
+  } catch (jsonErr) {
+    // Not JSON — fall through to GML parser
+    if (!(jsonErr.message.startsWith('WFS') || jsonErr instanceof SyntaxError)) throw jsonErr;
   }
+
+  // GML fallback
+  return gmlToGeojson(body, typeName);
 
   // GML fallback
   const text = await resp.text();
