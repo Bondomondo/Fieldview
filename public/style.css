@@ -930,6 +930,13 @@ html, body {
 }
 
 /* ── Leaflet overrides ─────────────────────────────────────── */
+/* Move zoom control to bottom-right, above the scale bar */
+.leaflet-top.leaflet-left {
+  top: auto !important;
+  left: auto !important;
+  bottom: 116px;
+  right: 16px;
+}
 .leaflet-control-zoom {
   border: 1px solid var(--border-light) !important;
   border-radius: var(--radius-sm) !important;
