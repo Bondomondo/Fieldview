@@ -264,18 +264,40 @@ document.getElementById('label-color-swatches').addEventListener('click', e => {
   _selectedLabelColor = swatch.dataset.color;
 });
 
+// Toggle new-label fields based on dropdown selection
+document.getElementById('label-select-assign').addEventListener('change', e => {
+  const isNew = e.target.value === '__new__';
+  document.getElementById('new-label-fields').hidden = !isNew;
+  document.getElementById('btn-assign-label').textContent = isNew ? 'Create Label Layer' : 'Add to Label';
+});
+
 document.getElementById('btn-assign-label').addEventListener('click', () => {
-  const name = document.getElementById('label-name-input').value.trim();
-  if (!name) { toast('Enter a label name', 'warning'); return; }
   if (!_currentFeature) return;
-  assignLabel(name, _selectedLabelColor, _currentFeature);
-  document.getElementById('label-name-input').value = '';
+  const sel = document.getElementById('label-select-assign');
+  if (sel.value === '__new__') {
+    const name = document.getElementById('label-name-input').value.trim();
+    if (!name) { toast('Enter a label name', 'warning'); return; }
+    createLabelLayer(name, _selectedLabelColor, _currentFeature);
+    document.getElementById('label-name-input').value = '';
+  } else {
+    addFeatureToLabel(sel.value, _currentFeature);
+  }
   document.getElementById('feature-info').hidden = true;
 });
 
+function populateLabelSelect() {
+  const sel = document.getElementById('label-select-assign');
+  const labels = state.layers.filter(l => l.type === 'Label');
+  sel.innerHTML = `<option value="__new__">— New label —</option>` +
+    labels.map(l => `<option value="${l.id}">${escHtml(l.name)}</option>`).join('');
+  const isNew = sel.value === '__new__';
+  document.getElementById('new-label-fields').hidden = !isNew;
+  document.getElementById('btn-assign-label').textContent = isNew ? 'Create Label Layer' : 'Add to Label';
+}
+
 function showFeatureInfo(feature, layerName) {
   _currentFeature = feature;
-  const props = feature?.properties ?? feature; // accept plain props or full feature
+  const props = feature?.properties ?? feature;
   document.getElementById('feature-info-title').textContent = layerName || 'Feature Properties';
   const body = document.getElementById('feature-info-body');
   const entries = Object.entries(props || {}).filter(([k]) => !k.startsWith('@'));
@@ -286,31 +308,42 @@ function showFeatureInfo(feature, layerName) {
       ${entries.map(([k, v]) => `<tr><td>${escHtml(k)}</td><td>${escHtml(String(v ?? ''))}</td></tr>`).join('')}
     </tbody></table>`;
   }
+  populateLabelSelect();
   document.getElementById('feature-info').hidden = false;
 }
 
-function assignLabel(labelName, color, feature) {
-  const geojson = {
-    type: 'FeatureCollection',
-    features: [feature.type === 'Feature' ? feature : { type: 'Feature', geometry: feature.geometry ?? null, properties: feature.properties ?? {} }],
-  };
-  const leafletLayer = L.geoJSON(geojson, {
-    style: () => ({
-      color,
-      weight: 2,
-      opacity: 0.9,
-      fillColor: color,
-      fillOpacity: 0.25,
-    }),
-    pointToLayer: (f, latlng) => L.circleMarker(latlng, {
-      radius: 6, color, weight: 2, fillColor: color, fillOpacity: 0.8,
-    }),
-    onEachFeature: (f, layer) => {
-      layer.on('click', () => showFeatureInfo(f, labelName));
-    },
+function normalizeFeature(feature) {
+  return feature.type === 'Feature'
+    ? feature
+    : { type: 'Feature', geometry: feature.geometry ?? null, properties: feature.properties ?? {} };
+}
+
+function createLabelLayer(labelName, color, feature) {
+  const f = normalizeFeature(feature);
+  const leafletLayer = L.geoJSON({ type: 'FeatureCollection', features: [f] }, {
+    style: () => ({ color, weight: 2, opacity: 0.9, fillColor: color, fillOpacity: 0.25 }),
+    pointToLayer: (_, latlng) => L.circleMarker(latlng, { radius: 6, color, weight: 2, fillColor: color, fillOpacity: 0.8 }),
+    onEachFeature: (feat, layer) => { layer.on('click', () => showFeatureInfo(feat, labelName)); },
   });
   addLayer({ name: labelName, type: 'Label', color, leafletLayer, featureCount: 1 });
   toast(`Label "${labelName}" created`, 'success');
+}
+
+function addFeatureToLabel(layerId, feature) {
+  const entry = state.layers.find(l => l.id === layerId);
+  if (!entry) return;
+  const f = normalizeFeature(feature);
+  entry.leafletLayer.addData(f);
+  // Re-bind click on the newly added sub-layer
+  entry.leafletLayer.eachLayer(sub => {
+    if (!sub._labelClickBound) {
+      sub._labelClickBound = true;
+      sub.on('click', () => showFeatureInfo(sub.feature, entry.name));
+    }
+  });
+  entry.featureCount += 1;
+  renderLayerList();
+  toast(`Added to label "${entry.name}"`, 'success');
 }
 
 function escHtml(s) {
