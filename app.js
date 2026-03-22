@@ -359,9 +359,23 @@ async function handleFileUpload(file) {
   const count = geojson.features?.length ?? 0;
   if (!count) { toast(`No features found in ${file.name}`, 'warning'); return; }
 
-  const color = nextColor();
+  const color = '#ff0000';
   const name  = file.name.replace(/\.(kmz|kml)$/i, '');
-  const leafletLayer = buildGeoJsonLayer(geojson, color, name);
+  const leafletLayer = L.geoJSON(geojson, {
+    style: () => ({
+      color,
+      weight: 2,
+      opacity: 0.9,
+      dashArray: '6 6',
+      fillOpacity: 0,
+    }),
+    pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
+      radius: 6, color, weight: 2, dashArray: '4 4', fillOpacity: 0,
+    }),
+    onEachFeature: (feature, layer) => {
+      layer.on('click', () => showFeatureInfo(feature.properties, name));
+    },
+  });
   addLayer({ name, type: 'KMZ/KML', color, leafletLayer, featureCount: count });
 
   try { map.fitBounds(leafletLayer.getBounds(), { padding: [40, 40] }); } catch {}
