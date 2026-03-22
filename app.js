@@ -109,6 +109,7 @@ document.getElementById('btn-report').addEventListener('click', openReport);
 document.getElementById('close-report').addEventListener('click', () => {
   document.getElementById('report-backdrop').hidden = true;
 });
+document.getElementById('btn-print-report').addEventListener('click', () => window.print());
 document.getElementById('report-backdrop').addEventListener('click', e => {
   if (e.target === e.currentTarget) e.currentTarget.hidden = true;
 });

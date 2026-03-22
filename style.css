@@ -777,11 +777,11 @@ html, body {
   background: rgba(0,0,0,.65);
   backdrop-filter: blur(4px);
   z-index: 1500;
-  display: flex;
   align-items: center;
   justify-content: center;
   padding: 24px;
 }
+.report-backdrop:not([hidden]) { display: flex; }
 
 .report-modal {
   background: var(--bg-surface);
@@ -890,6 +890,44 @@ html, body {
 
 .report-table tr:last-child td { border-bottom: none; }
 .report-table tbody tr:hover { background: var(--bg-hover); }
+
+.report-header-actions { display: flex; align-items: center; gap: 6px; }
+
+/* ── Print / Export ────────────────────────────────────────── */
+@media print {
+  body > *:not(#report-backdrop) { display: none !important; }
+
+  .report-backdrop {
+    position: static !important;
+    background: none !important;
+    backdrop-filter: none !important;
+    padding: 0 !important;
+    display: block !important;
+  }
+
+  .report-modal {
+    max-height: none !important;
+    box-shadow: none !important;
+    border: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  .report-header-actions { display: none !important; }
+
+  .report-body {
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+
+  .report-group { page-break-inside: avoid; }
+
+  .report-table { border: 1px solid #ccc !important; }
+  .report-table th { background: #f0f0f0 !important; color: #000 !important; }
+  .report-table td { color: #000 !important; border-color: #ccc !important; }
+  .report-group-name { color: #000 !important; }
+  .report-group-count { color: #555 !important; }
+}
 
 /* ── Leaflet overrides ─────────────────────────────────────── */
 .leaflet-control-zoom {
