@@ -16,11 +16,11 @@ const app  = express();
 const PORT = process.env.PORT || 3000;
 
 // ── Static files ─────────────────────────────────────────────
-app.use(express.static(path.join(__dirname)));
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Add this BEFORE your /proxy route
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // ── WFS Proxy ────────────────────────────────────────────────
