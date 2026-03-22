@@ -81,8 +81,7 @@
             <input
               type="url"
               id="wfs-url"
-              placeholder="https://epub.sjv.se/inspire/opendata/wfs"
-              value="https://epub.sjv.se/inspire/opendata/wfs"
+              placeholder="https://example.com/wfs"
             />
             <button class="btn btn-primary" id="btn-load-caps" title="Load capabilities">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.2"/></svg>
@@ -162,7 +161,7 @@
     </div>
 
     <!-- Loading overlay -->
-    <div class="loading-overlay" id="loading-overlay" hidden>
+    <div class="loading-overlay" id="loading-overlay" style="display:none">
       <div class="spinner"></div>
       <span id="loading-text">Loading…</span>
     </div>
