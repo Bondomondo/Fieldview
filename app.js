@@ -129,10 +129,10 @@ function proxied(url) {
 // ── Helpers: Loading overlay ─────────────────────────────────
 function showLoading(text = 'Loading…') {
   document.getElementById('loading-text').textContent = text;
-  document.getElementById('loading-overlay').hidden = false;
+  document.getElementById('loading-overlay').style.display = 'flex';
 }
 function hideLoading() {
-  document.getElementById('loading-overlay').hidden = true;
+  document.getElementById('loading-overlay').style.display = 'none';
 }
 
 // ── Helpers: Toast ───────────────────────────────────────────
@@ -342,25 +342,31 @@ fileInput.addEventListener('change', () => {
 
 async function handleFileUpload(file) {
   showLoading(`Parsing ${file.name}…`);
+  let geojson;
   try {
-    const geojson = await parseKmzFile(file);
-    const count = geojson.features?.length ?? 0;
-    if (!count) { toast(`No features found in ${file.name}`, 'warning'); return; }
-
-    const color = nextColor();
-    const name  = file.name.replace(/\.(kmz|kml)$/i, '');
-    const leafletLayer = buildGeoJsonLayer(geojson, color, name);
-    addLayer({ name, type: 'KMZ/KML', color, leafletLayer, featureCount: count });
-
-    try { map.fitBounds(leafletLayer.getBounds(), { padding: [40, 40] }); } catch {}
-    addUploadedFileBadge(name, color, count);
-    toast(`Loaded "${name}" — ${count} features`, 'success');
+    geojson = await parseKmzFile(file);
   } catch (err) {
+    hideLoading();
     toast(`Error reading file: ${err.message}`, 'error', 5000);
     console.error(err);
-  } finally {
-    hideLoading();
+    return;
   }
+
+  // Dismiss the overlay before the heavy Leaflet rendering work so the
+  // browser can clear the spinner before it gets busy drawing polygons.
+  hideLoading();
+
+  const count = geojson.features?.length ?? 0;
+  if (!count) { toast(`No features found in ${file.name}`, 'warning'); return; }
+
+  const color = nextColor();
+  const name  = file.name.replace(/\.(kmz|kml)$/i, '');
+  const leafletLayer = buildGeoJsonLayer(geojson, color, name);
+  addLayer({ name, type: 'KMZ/KML', color, leafletLayer, featureCount: count });
+
+  try { map.fitBounds(leafletLayer.getBounds(), { padding: [40, 40] }); } catch {}
+  addUploadedFileBadge(name, color, count);
+  toast(`Loaded "${name}" — ${count} features`, 'success');
 }
 
 function addUploadedFileBadge(name, color, count) {
