@@ -669,6 +669,53 @@ html, body {
 
 .btn-full { width: 100%; }
 
+/* Dark select inside label-assign-section */
+.label-assign-section select {
+  width: 100%;
+  appearance: none;
+  background: var(--bg-base);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 13px;
+  padding: 6px 28px 6px 8px;
+  outline: none;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color var(--transition);
+}
+.label-assign-section select:focus { border-color: var(--accent-blue); }
+.label-assign-section select option { background: var(--bg-elevated); color: var(--text-primary); }
+.label-assign-section .select-wrapper::after {
+  content: '▾';
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  pointer-events: none;
+  font-size: 12px;
+}
+
+/* ── Label Save / Load row ─────────────────────────────────── */
+.label-io-row {
+  display: flex;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+.label-io-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: 12px;
+  padding: 5px 8px;
+}
+.label-io-btn svg { width: 14px; height: 14px; flex-shrink: 0; }
+
 /* ── Loading Overlay ───────────────────────────────────────── */
 .loading-overlay {
   position: absolute;
