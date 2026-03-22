@@ -710,6 +710,61 @@ async function refetchWfsLayers() {
   renderLayerList();
 }
 
+// ── Label save / load ─────────────────────────────────────────
+document.getElementById('btn-save-labels').addEventListener('click', saveLabels);
+document.getElementById('btn-load-labels').addEventListener('click', () => {
+  document.getElementById('label-file-input').click();
+});
+document.getElementById('label-file-input').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (file) loadLabels(file);
+  e.target.value = '';
+});
+
+function saveLabels() {
+  const labels = state.layers.filter(l => l.type === 'Label');
+  if (!labels.length) { toast('No label layers to save', 'warning'); return; }
+  const data = labels.map(l => ({
+    name: l.name,
+    color: l.color,
+    features: l.leafletLayer.toGeoJSON().features,
+  }));
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `fieldview-labels-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast(`Saved ${labels.length} label layer(s)`, 'success');
+}
+
+async function loadLabels(file) {
+  let data;
+  try {
+    data = JSON.parse(await file.text());
+    if (!Array.isArray(data)) throw new Error('Expected an array');
+  } catch (err) {
+    toast(`Invalid label file: ${err.message}`, 'error', 5000);
+    return;
+  }
+  let count = 0;
+  for (const item of data) {
+    if (!item.name || !item.color || !Array.isArray(item.features)) continue;
+    const geojson = { type: 'FeatureCollection', features: item.features };
+    const color = item.color;
+    const labelName = item.name;
+    const leafletLayer = L.geoJSON(geojson, {
+      style: () => ({ color, weight: 2, opacity: 0.9, fillColor: color, fillOpacity: 0.25 }),
+      pointToLayer: (_, latlng) => L.circleMarker(latlng, { radius: 6, color, weight: 2, fillColor: color, fillOpacity: 0.8 }),
+      onEachFeature: (feat, layer) => { layer.on('click', () => showFeatureInfo(feat, labelName)); },
+    });
+    addLayer({ name: labelName, type: 'Label', color, leafletLayer, featureCount: item.features.length });
+    count++;
+  }
+  if (count) toast(`Loaded ${count} label layer(s)`, 'success');
+  else toast('No valid label layers found in file', 'warning');
+}
+
 // ── GML → GeoJSON fallback ─────────────────────────────────────
 function gmlToGeojson(xmlText, typeName) {
   const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
