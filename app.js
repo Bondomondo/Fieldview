@@ -104,6 +104,58 @@ document.getElementById('btn-toggle-sidebar').addEventListener('click', () => {
   setTimeout(() => map.invalidateSize(), 200);
 });
 
+// ── Report modal ─────────────────────────────────────────────
+document.getElementById('btn-report').addEventListener('click', openReport);
+document.getElementById('close-report').addEventListener('click', () => {
+  document.getElementById('report-backdrop').hidden = true;
+});
+document.getElementById('report-backdrop').addEventListener('click', e => {
+  if (e.target === e.currentTarget) e.currentTarget.hidden = true;
+});
+
+function openReport() {
+  const labels = state.layers.filter(l => l.type === 'Label');
+  const body = document.getElementById('report-body');
+
+  if (!labels.length) {
+    body.innerHTML = '<p class="report-empty">No label layers yet. Click a feature and assign a label to get started.</p>';
+    document.getElementById('report-backdrop').hidden = false;
+    return;
+  }
+
+  body.innerHTML = labels.map(label => {
+    const features = label.leafletLayer.toGeoJSON().features;
+    // Collect all unique property keys across features
+    const keys = [...new Set(features.flatMap(f => Object.keys(f.properties || {})).filter(k => !k.startsWith('@')))];
+
+    const thead = keys.length
+      ? `<tr>${keys.map(k => `<th>${escHtml(k)}</th>`).join('')}</tr>`
+      : '<tr><th>(no properties)</th></tr>';
+
+    const tbody = features.map(f => {
+      const props = f.properties || {};
+      return keys.length
+        ? `<tr>${keys.map(k => `<td>${escHtml(String(props[k] ?? ''))}</td>`).join('')}</tr>`
+        : '<tr><td>—</td></tr>';
+    }).join('');
+
+    return `
+      <div class="report-group">
+        <div class="report-group-header">
+          <div class="report-group-dot" style="background:${label.color}"></div>
+          <span class="report-group-name">${escHtml(label.name)}</span>
+          <span class="report-group-count">${features.length} feature${features.length !== 1 ? 's' : ''}</span>
+        </div>
+        <table class="report-table">
+          <thead>${thead}</thead>
+          <tbody>${tbody}</tbody>
+        </table>
+      </div>`;
+  }).join('');
+
+  document.getElementById('report-backdrop').hidden = false;
+}
+
 // ── Fit all ──────────────────────────────────────────────────
 document.getElementById('btn-fit-all').addEventListener('click', fitAll);
 
