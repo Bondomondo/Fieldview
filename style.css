@@ -616,6 +616,53 @@ html, body {
   word-break: break-word;
 }
 
+/* ── Label Assignment Section ──────────────────────────────── */
+.label-assign-section {
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.label-assign-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--text-muted);
+}
+
+.label-name-input {
+  width: 100%;
+  background: var(--bg-base);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 13px;
+  padding: 6px 8px;
+  outline: none;
+}
+.label-name-input:focus { border-color: var(--accent-blue); }
+
+.label-color-swatches {
+  display: flex;
+  gap: 6px;
+}
+
+.label-swatch {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  transition: border-color var(--transition), transform var(--transition);
+}
+.label-swatch:hover  { transform: scale(1.15); }
+.label-swatch.active { border-color: #fff; }
+
+.btn-full { width: 100%; }
+
 /* ── Loading Overlay ───────────────────────────────────────── */
 .loading-overlay {
   position: absolute;

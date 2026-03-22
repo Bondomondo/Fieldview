@@ -248,11 +248,34 @@ document.getElementById('layer-list').addEventListener('click', e => {
 });
 
 // ── Feature info panel ───────────────────────────────────────
+let _currentFeature = null;
+let _selectedLabelColor = '#4caf71';
+
 document.getElementById('close-feature-info').addEventListener('click', () => {
   document.getElementById('feature-info').hidden = true;
 });
 
-function showFeatureInfo(props, layerName) {
+// Color swatch selection
+document.getElementById('label-color-swatches').addEventListener('click', e => {
+  const swatch = e.target.closest('.label-swatch');
+  if (!swatch) return;
+  document.querySelectorAll('.label-swatch').forEach(s => s.classList.remove('active'));
+  swatch.classList.add('active');
+  _selectedLabelColor = swatch.dataset.color;
+});
+
+document.getElementById('btn-assign-label').addEventListener('click', () => {
+  const name = document.getElementById('label-name-input').value.trim();
+  if (!name) { toast('Enter a label name', 'warning'); return; }
+  if (!_currentFeature) return;
+  assignLabel(name, _selectedLabelColor, _currentFeature);
+  document.getElementById('label-name-input').value = '';
+  document.getElementById('feature-info').hidden = true;
+});
+
+function showFeatureInfo(feature, layerName) {
+  _currentFeature = feature;
+  const props = feature?.properties ?? feature; // accept plain props or full feature
   document.getElementById('feature-info-title').textContent = layerName || 'Feature Properties';
   const body = document.getElementById('feature-info-body');
   const entries = Object.entries(props || {}).filter(([k]) => !k.startsWith('@'));
@@ -264,6 +287,30 @@ function showFeatureInfo(props, layerName) {
     </tbody></table>`;
   }
   document.getElementById('feature-info').hidden = false;
+}
+
+function assignLabel(labelName, color, feature) {
+  const geojson = {
+    type: 'FeatureCollection',
+    features: [feature.type === 'Feature' ? feature : { type: 'Feature', geometry: feature.geometry ?? null, properties: feature.properties ?? {} }],
+  };
+  const leafletLayer = L.geoJSON(geojson, {
+    style: () => ({
+      color,
+      weight: 2,
+      opacity: 0.9,
+      fillColor: color,
+      fillOpacity: 0.25,
+    }),
+    pointToLayer: (f, latlng) => L.circleMarker(latlng, {
+      radius: 6, color, weight: 2, fillColor: color, fillOpacity: 0.8,
+    }),
+    onEachFeature: (f, layer) => {
+      layer.on('click', () => showFeatureInfo(f, labelName));
+    },
+  });
+  addLayer({ name: labelName, type: 'Label', color, leafletLayer, featureCount: 1 });
+  toast(`Label "${labelName}" created`, 'success');
 }
 
 function escHtml(s) {
@@ -288,7 +335,7 @@ function buildGeoJsonLayer(geojson, color, layerName) {
       radius: 6, color, weight: 2, fillColor: color, fillOpacity: 0.8,
     }),
     onEachFeature: (feature, layer) => {
-      layer.on('click', () => showFeatureInfo(feature.properties, layerName));
+      layer.on('click', () => showFeatureInfo(feature, layerName));
       layer.on('mouseover', function () {
         if (!feature.geometry?.type.includes('Point')) this.setStyle({ fillOpacity: 0.5, weight: 3 });
       });
@@ -373,7 +420,7 @@ async function handleFileUpload(file) {
       radius: 6, color, weight: 2, dashArray: '4 4', fillOpacity: 0,
     }),
     onEachFeature: (feature, layer) => {
-      layer.on('click', () => showFeatureInfo(feature.properties, name));
+      layer.on('click', () => showFeatureInfo(feature, name));
     },
   });
   addLayer({ name, type: 'KMZ/KML', color, leafletLayer, featureCount: count });
