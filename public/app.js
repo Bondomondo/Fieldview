@@ -787,9 +787,10 @@ document.getElementById('label-file-input').addEventListener('change', e => {
 });
 
 function saveLabels() {
-  const labels = state.layers.filter(l => l.type === 'Label');
-  if (!labels.length) { toast('No label layers to save', 'warning'); return; }
-  const data = labels.map(l => ({
+  const saveable = state.layers.filter(l => l.type === 'Label' || l.type === 'KMZ/KML');
+  if (!saveable.length) { toast('No label or KMZ/KML layers to save', 'warning'); return; }
+  const data = saveable.map(l => ({
+    type: l.type,
     name: l.name,
     color: l.color,
     features: l.leafletLayer.toGeoJSON().features,
@@ -800,7 +801,12 @@ function saveLabels() {
   a.download = `fieldview-labels-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
-  toast(`Saved ${labels.length} label layer(s)`, 'success');
+  const labelCount = saveable.filter(l => l.type === 'Label').length;
+  const kmzCount   = saveable.filter(l => l.type === 'KMZ/KML').length;
+  const parts = [];
+  if (labelCount) parts.push(`${labelCount} label layer${labelCount !== 1 ? 's' : ''}`);
+  if (kmzCount)   parts.push(`${kmzCount} KMZ/KML layer${kmzCount !== 1 ? 's' : ''}`);
+  toast(`Saved ${parts.join(' and ')}`, 'success');
 }
 
 async function loadLabels(file) {
@@ -812,22 +818,42 @@ async function loadLabels(file) {
     toast(`Invalid label file: ${err.message}`, 'error', 5000);
     return;
   }
-  let count = 0;
+  let labelCount = 0, kmzCount = 0;
   for (const item of data) {
     if (!item.name || !item.color || !Array.isArray(item.features)) continue;
     const geojson = { type: 'FeatureCollection', features: item.features };
     const color = item.color;
-    const labelName = item.name;
-    const leafletLayer = L.geoJSON(geojson, {
-      style: () => ({ color, weight: 2, opacity: 0.9, fillColor: color, fillOpacity: 0.25 }),
-      pointToLayer: (_, latlng) => L.circleMarker(latlng, { radius: 6, color, weight: 2, fillColor: color, fillOpacity: 0.8 }),
-      onEachFeature: (feat, layer) => { layer.on('click', () => showFeatureInfo(feat, labelName)); },
-    });
-    addLayer({ name: labelName, type: 'Label', color, leafletLayer, featureCount: item.features.length });
-    count++;
+    const layerName = item.name;
+    // Files saved before type field was added default to 'Label'
+    const layerType = item.type === 'KMZ/KML' ? 'KMZ/KML' : 'Label';
+
+    if (layerType === 'KMZ/KML') {
+      const leafletLayer = L.geoJSON(geojson, {
+        style: () => ({ color, weight: 2, opacity: 0.9, fillColor: color, fillOpacity: 0.25 }),
+        pointToLayer: (_, latlng) => L.circleMarker(latlng, { radius: 6, color, weight: 2, fillColor: color, fillOpacity: 0.8 }),
+        onEachFeature: (feat, layer) => { layer.on('click', () => showFeatureInfo(feat, layerName)); },
+      });
+      addLayer({ name: layerName, type: 'KMZ/KML', color, leafletLayer, featureCount: item.features.length });
+      kmzCount++;
+    } else {
+      const leafletLayer = L.geoJSON(geojson, {
+        style: () => ({ color, weight: 2, opacity: 0.9, fillColor: color, fillOpacity: 0.25 }),
+        pointToLayer: (_, latlng) => L.circleMarker(latlng, { radius: 6, color, weight: 2, fillColor: color, fillOpacity: 0.8 }),
+        onEachFeature: (feat, layer) => { layer.on('click', () => showFeatureInfo(feat, layerName)); },
+      });
+      addLayer({ name: layerName, type: 'Label', color, leafletLayer, featureCount: item.features.length });
+      labelCount++;
+    }
   }
-  if (count) toast(`Loaded ${count} label layer(s)`, 'success');
-  else toast('No valid label layers found in file', 'warning');
+  const total = labelCount + kmzCount;
+  if (total) {
+    const parts = [];
+    if (labelCount) parts.push(`${labelCount} label layer${labelCount !== 1 ? 's' : ''}`);
+    if (kmzCount)   parts.push(`${kmzCount} KMZ/KML layer${kmzCount !== 1 ? 's' : ''}`);
+    toast(`Loaded ${parts.join(' and ')}`, 'success');
+  } else {
+    toast('No valid layers found in file', 'warning');
+  }
 }
 
 // ── GML → GeoJSON fallback ─────────────────────────────────────
