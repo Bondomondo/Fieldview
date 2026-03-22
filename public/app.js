@@ -330,6 +330,11 @@ document.getElementById('btn-assign-label').addEventListener('click', () => {
   if (sel.value === '__new__') {
     const name = document.getElementById('label-name-input').value.trim();
     if (!name) { toast('Enter a label name', 'warning'); return; }
+    const existing = state.layers.find(l => l.type === 'Label' && l.name.toLowerCase() === name.toLowerCase());
+    if (existing) {
+      toast(`Label "${existing.name}" already exists — select it from the dropdown`, 'warning');
+      return;
+    }
     createLabelLayer(name, _selectedLabelColor, _currentFeature);
     document.getElementById('label-name-input').value = '';
   } else {
@@ -386,6 +391,13 @@ function addFeatureToLabel(layerId, feature) {
   const entry = state.layers.find(l => l.id === layerId);
   if (!entry) return;
   const f = normalizeFeature(feature);
+  const geomStr = JSON.stringify(f.geometry);
+  const isDuplicate = entry.leafletLayer.toGeoJSON().features
+    .some(ef => JSON.stringify(ef.geometry) === geomStr);
+  if (isDuplicate) {
+    toast(`This feature is already in label "${entry.name}"`, 'warning');
+    return;
+  }
   entry.leafletLayer.addData(f);
   // Re-bind click on the newly added sub-layer
   entry.leafletLayer.eachLayer(sub => {
