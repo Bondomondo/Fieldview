@@ -688,11 +688,3 @@ function gmlPointToGeojson(el) {
   return { type: 'Point', coordinates: [x, y] };
 }
 
-// ── Auto-load capabilities on startup ────────────────────────
-(async () => {
-  const urlInput = document.getElementById('wfs-url');
-  if (urlInput.value.trim()) {
-    await new Promise(r => setTimeout(r, 400));
-    await loadCapabilities();
-  }
-})();
