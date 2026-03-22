@@ -18,6 +18,11 @@ const PORT = process.env.PORT || 3000;
 // ── Static files ─────────────────────────────────────────────
 app.use(express.static(path.join(__dirname)));
 
+// Add this BEFORE your /proxy route
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
 // ── WFS Proxy ────────────────────────────────────────────────
 // GET /proxy?url=<encoded-wfs-url>
 app.get('/proxy', async (req, res) => {
