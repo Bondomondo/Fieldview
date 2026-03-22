@@ -264,7 +264,7 @@ function renderLayerList() {
   }
   ul.innerHTML = state.layers.map(l => `
     <li class="layer-item" data-id="${l.id}">
-      <div class="layer-item-color" style="background:${l.color}"></div>
+      ${layerSwatchHtml(l)}
       <div class="layer-item-info">
         <div class="layer-item-name" title="${l.name}">${l.name}</div>
         <div class="layer-item-meta">${l.featureCount} features · ${l.type}${l.wfsConfig ? ' · live' : ''}</div>
@@ -282,6 +282,15 @@ function renderLayerList() {
       </div>
     </li>
   `).join('');
+}
+
+function layerSwatchHtml(l) {
+  if (l.type === 'KMZ/KML') {
+    return `<svg width="20" height="12" viewBox="0 0 20 12" style="flex-shrink:0" aria-hidden="true">
+      <line x1="1" y1="6" x2="19" y2="6" stroke="${l.color}" stroke-width="2.5" stroke-dasharray="4 3" stroke-linecap="round"/>
+    </svg>`;
+  }
+  return `<div class="layer-item-color" style="background:${l.color}"></div>`;
 }
 
 // SVG helpers
@@ -532,7 +541,9 @@ function addUploadedFileBadge(name, color, count) {
   const el = document.createElement('div');
   el.className = 'uploaded-file-item';
   el.innerHTML = `
-    <div class="file-dot" style="background:${color}"></div>
+    <svg width="16" height="10" viewBox="0 0 16 10" style="flex-shrink:0" aria-hidden="true">
+      <line x1="1" y1="5" x2="15" y2="5" stroke="${color}" stroke-width="2" stroke-dasharray="4 3" stroke-linecap="round"/>
+    </svg>
     <span class="file-name" title="${escHtml(name)}">${escHtml(name)}</span>
     <span class="file-count">${count} ft</span>
   `;
@@ -829,8 +840,8 @@ async function loadLabels(file) {
 
     if (layerType === 'KMZ/KML') {
       const leafletLayer = L.geoJSON(geojson, {
-        style: () => ({ color, weight: 2, opacity: 0.9, fillColor: color, fillOpacity: 0.25 }),
-        pointToLayer: (_, latlng) => L.circleMarker(latlng, { radius: 6, color, weight: 2, fillColor: color, fillOpacity: 0.8 }),
+        style: () => ({ color, weight: 2, opacity: 0.9, dashArray: '6 6', fillOpacity: 0 }),
+        pointToLayer: (_, latlng) => L.circleMarker(latlng, { radius: 6, color, weight: 2, dashArray: '4 4', fillOpacity: 0 }),
         onEachFeature: (feat, layer) => { layer.on('click', () => showFeatureInfo(feat, layerName)); },
       });
       addLayer({ name: layerName, type: 'KMZ/KML', color, leafletLayer, featureCount: item.features.length });
