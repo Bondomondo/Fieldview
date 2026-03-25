@@ -267,7 +267,7 @@ function renderLayerList() {
       ${layerSwatchHtml(l)}
       <div class="layer-item-info">
         <div class="layer-item-name" title="${l.name}">${l.name}</div>
-        <div class="layer-item-meta">${l.featureCount} features · ${l.type}${l.wfsConfig ? ' · live' : ''}</div>
+        <div class="layer-item-meta">${l.featureCount != null ? l.featureCount + ' features · ' : ''}${l.type}${l.wfsConfig ? ' · live' : ''}</div>
       </div>
       <div class="layer-item-actions">
         <button class="btn-layer-vis ${l.visible ? '' : 'hidden-layer'}" data-action="vis" data-id="${l.id}" title="${l.visible ? 'Hide' : 'Show'}">
@@ -558,46 +558,97 @@ document.getElementById('wfs-url').addEventListener('keydown', e => {
 
 async function loadCapabilities() {
   const rawUrl = document.getElementById('wfs-url').value.trim();
-  if (!rawUrl) { setStatus('caps-status', 'Please enter a WFS URL', 'error'); return; }
+  if (!rawUrl) { setStatus('caps-status', 'Please enter a WFS or WMS URL', 'error'); return; }
 
-  setStatus('caps-status', 'Fetching capabilities…', 'loading');
+  const serviceType = detectServiceType(rawUrl);
+  state.serviceType = serviceType;
+
+  setStatus('caps-status', `Fetching ${serviceType} capabilities…`, 'loading');
   document.getElementById('layer-selector-wrap').hidden = true;
-  showLoading('Fetching WFS capabilities…');
+  showLoading(`Fetching ${serviceType} capabilities…`);
 
-  const capsUrl = buildCapsUrl(rawUrl);
+  const capsUrl = buildCapsUrl(rawUrl, serviceType);
 
   try {
     const resp = await fetchWithTimeout(proxied(capsUrl));
     if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
-    parseCapsXml(await resp.text(), rawUrl);
+    parseCapsXml(await resp.text(), rawUrl, serviceType);
   } catch (err) {
     setStatus('caps-status', `Failed to load capabilities: ${err.message}`, 'error');
-    toast('WFS capabilities failed — check the URL', 'error', 6000);
+    toast(`${serviceType} capabilities failed — check the URL`, 'error', 6000);
     console.error(err);
   } finally {
     hideLoading();
   }
 }
 
-function buildCapsUrl(base) {
+function detectServiceType(url) {
+  try {
+    const u = new URL(url.startsWith('http') ? url : 'https://' + url);
+    const svc = (u.searchParams.get('SERVICE') || u.searchParams.get('service') || '').toUpperCase();
+    if (svc === 'WMS') return 'WMS';
+    if (svc === 'WFS') return 'WFS';
+    // Guess from path (e.g. ArcGIS WmsServer / WFSServer)
+    if (/wmsserver|\/wms/i.test(u.pathname)) return 'WMS';
+    if (/wfsserver|\/wfs/i.test(u.pathname)) return 'WFS';
+  } catch {}
+  return 'WFS'; // safe default
+}
+
+function buildCapsUrl(base, serviceType = 'WFS') {
   const url = new URL(base.startsWith('http') ? base : 'https://' + base);
-  url.searchParams.set('service', 'WFS');
-  url.searchParams.set('request', 'GetCapabilities');
+  url.searchParams.set('SERVICE', serviceType);
+  url.searchParams.set('REQUEST', 'GetCapabilities');
   return url.toString();
 }
 
-function parseCapsXml(xmlText, baseUrl) {
+function parseCapsXml(xmlText, baseUrl, serviceType) {
   const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
   if (doc.querySelector('parsererror')) {
     setStatus('caps-status', 'Server returned invalid XML', 'error');
     return;
   }
 
-  // querySelectorAll ignores namespace prefixes; use local-name matching via XPath-style
-  // fallback so we handle both wfs:FeatureType and plain FeatureType.
+  if (serviceType === 'WMS') {
+    parseCapsXmlWms(doc, baseUrl);
+  } else {
+    parseCapsXmlWfs(doc, baseUrl);
+  }
+}
+
+function getDirectChildText(el, tag) {
+  for (const child of el.children) {
+    if (child.localName === tag) return child.textContent.trim();
+  }
+  return '';
+}
+
+function parseCapsXmlWms(doc, baseUrl) {
+  // Collect all <Layer> elements that have a direct <Name> child (named/leaf layers)
+  const allLayers = Array.from(doc.getElementsByTagNameNS('*', 'Layer'));
+  const namedLayers = allLayers.filter(l => getDirectChildText(l, 'Name'));
+
+  if (!namedLayers.length) {
+    setStatus('caps-status', 'No layers found in this WMS service', 'error');
+    return;
+  }
+
+  state.capsLayers = namedLayers.map(l => ({
+    name:        getDirectChildText(l, 'Name'),
+    title:       getDirectChildText(l, 'Title'),
+    abstract:    getDirectChildText(l, 'Abstract'),
+    baseUrl,
+    serviceType: 'WMS',
+  }));
+
+  renderCapsSelect();
+  document.getElementById('feature-limit-row').hidden = true;
+  setStatus('caps-status', `Found ${state.capsLayers.length} WMS layer(s)`, 'success');
+}
+
+function parseCapsXmlWfs(doc, baseUrl) {
   let featureTypes = Array.from(doc.querySelectorAll('FeatureType'));
   if (!featureTypes.length) {
-    // Try namespace-aware lookup
     featureTypes = Array.from(doc.getElementsByTagNameNS('*', 'FeatureType'));
   }
   if (!featureTypes.length) {
@@ -606,22 +657,26 @@ function parseCapsXml(xmlText, baseUrl) {
   }
 
   state.capsLayers = featureTypes.map(ft => {
-    // getElementsByTagNameNS('*', tag) works regardless of prefix
     const getText = tag => ft.getElementsByTagNameNS('*', tag)[0]?.textContent?.trim() ?? '';
     return {
-      name:     getText('Name'),
-      title:    getText('Title'),
-      abstract: getText('Abstract'),
+      name:        getText('Name'),
+      title:       getText('Title'),
+      abstract:    getText('Abstract'),
       baseUrl,
+      serviceType: 'WFS',
     };
   }).filter(l => l.name);
 
+  renderCapsSelect();
+  document.getElementById('feature-limit-row').hidden = false;
+  setStatus('caps-status', `Found ${state.capsLayers.length} WFS layer(s)`, 'success');
+}
+
+function renderCapsSelect() {
   const sel = document.getElementById('layer-select');
   sel.innerHTML = state.capsLayers.map(l =>
     `<option value="${escHtml(l.name)}">${escHtml(l.title || l.name)}</option>`
   ).join('');
-
-  setStatus('caps-status', `Found ${state.capsLayers.length} layer(s)`, 'success');
   document.getElementById('layer-selector-wrap').hidden = false;
   updateLayerDescription();
 }
@@ -636,9 +691,51 @@ function updateLayerDescription() {
   else { desc.hidden = true; }
 }
 
-// ── WFS GetFeature (viewport + scale gated) ───────────────────
-document.getElementById('btn-add-layer').addEventListener('click', loadWfsLayer);
+// ── WFS / WMS Add Layer ───────────────────────────────────────
+document.getElementById('btn-add-layer').addEventListener('click', loadSelectedLayer);
 
+function loadSelectedLayer() {
+  if (state.serviceType === 'WMS') loadWmsLayer();
+  else loadWfsLayer();
+}
+
+function loadWmsLayer() {
+  const layerName = document.getElementById('layer-select').value;
+  const rawUrl    = document.getElementById('wfs-url').value.trim();
+  if (!layerName) { toast('Select a layer first', 'warning'); return; }
+
+  const info        = state.capsLayers.find(l => l.name === layerName);
+  const displayName = info?.title || layerName;
+
+  // Strip query string — L.tileLayer.wms builds its own params
+  let baseWmsUrl;
+  try {
+    const u = new URL(rawUrl.startsWith('http') ? rawUrl : 'https://' + rawUrl);
+    u.search = '';
+    baseWmsUrl = u.toString();
+  } catch {
+    baseWmsUrl = rawUrl.split('?')[0];
+  }
+
+  const leafletLayer = L.tileLayer.wms(baseWmsUrl, {
+    layers:      layerName,
+    format:      'image/png',
+    transparent: true,
+    version:     '1.3.0',
+  });
+
+  // Route every tile request through the proxy so Basic Auth is injected server-side
+  const origGetTileUrl = leafletLayer.getTileUrl.bind(leafletLayer);
+  leafletLayer.getTileUrl = coords => '/proxy?url=' + encodeURIComponent(origGetTileUrl(coords));
+
+  const color = nextColor();
+  addLayer({ name: displayName, type: 'WMS', color, leafletLayer, featureCount: null });
+
+  setStatus('caps-status', `Loaded WMS layer "${displayName}"`, 'success');
+  toast(`Loaded WMS layer "${displayName}"`, 'success');
+}
+
+// ── WFS GetFeature (viewport + scale gated) ───────────────────
 async function loadWfsLayer() {
   if (!isScaleSufficientForWFS()) {
     toast(`Zoom in to at least 1:${SCALE_THRESHOLD.toLocaleString()} to load WFS features`, 'warning', 5000);

@@ -1,8 +1,14 @@
 /**
- * FieldView – WFS Proxy Server
+ * FieldView – WFS/WMS Proxy Server
  *
- * Serves the static frontend and proxies WFS requests to avoid
+ * Serves the static frontend and proxies WFS/WMS requests to avoid
  * browser CORS restrictions.
+ *
+ * Basic-auth credentials for upstream services are configured via
+ * environment variables (e.g. in Vercel project settings):
+ *
+ *   PROXY_CREDENTIALS – JSON array of per-host credentials:
+ *     [{ "host": "example.com", "username": "user", "password": "pass" }]
  *
  * Usage:  node server.js          (default port 3000)
  *         PORT=8080 node server.js
@@ -15,16 +21,40 @@ const path    = require('path');
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
+// ── Per-host credentials ──────────────────────────────────────
+// Loaded once at startup from the PROXY_CREDENTIALS env var.
+let proxyCredentials = [];
+if (process.env.PROXY_CREDENTIALS) {
+  try {
+    proxyCredentials = JSON.parse(process.env.PROXY_CREDENTIALS);
+    if (!Array.isArray(proxyCredentials)) throw new Error('Expected array');
+    console.log(`[proxy] loaded credentials for: ${proxyCredentials.map(c => c.host).join(', ')}`);
+  } catch (e) {
+    console.error('[proxy] invalid PROXY_CREDENTIALS env var:', e.message);
+  }
+}
+
+/**
+ * Returns a Basic-Auth header value for the given hostname,
+ * or null if no credentials are configured for it.
+ */
+function getBasicAuth(hostname) {
+  const entry = proxyCredentials.find(c => c.host && hostname.endsWith(c.host));
+  if (!entry || !entry.username) return null;
+  return 'Basic ' + Buffer.from(`${entry.username}:${entry.password ?? ''}`).toString('base64');
+}
+
 // ── Static files ─────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Add this BEFORE your /proxy route
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// ── WFS Proxy ────────────────────────────────────────────────
-// GET /proxy?url=<encoded-wfs-url>
+// ── Proxy ────────────────────────────────────────────────────
+// GET /proxy?url=<encoded-url>
+const ALLOWED_SERVICES = new Set(['WFS', 'WMS']);
+
 app.get('/proxy', async (req, res) => {
   const targetUrl = req.query.url;
 
@@ -39,27 +69,26 @@ app.get('/proxy', async (req, res) => {
     return res.status(400).json({ error: 'Invalid URL' });
   }
 
-  // Security: only proxy requests that look like WFS
-  const service = (parsed.searchParams.get('service') || '').toUpperCase();
-  if (service && service !== 'WFS') {
-    return res.status(403).json({ error: 'Only WFS service requests are allowed' });
+  // Security: only proxy recognised OGC services
+  const service = (parsed.searchParams.get('SERVICE') || parsed.searchParams.get('service') || '').toUpperCase();
+  if (service && !ALLOWED_SERVICES.has(service)) {
+    return res.status(403).json({ error: `Only ${[...ALLOWED_SERVICES].join('/')} service requests are allowed` });
   }
 
-  try {
-    const upstream = await fetch(targetUrl, {
-      headers: {
-        'User-Agent': 'FieldView/1.0 (+WFS proxy)',
-        'Accept': 'application/json, application/xml, text/xml, */*',
-      },
-      // Reasonable timeout: 30 s
-      timeout: 30000,
-    });
+  const headers = {
+    'User-Agent': 'FieldView/1.0 (+proxy)',
+    'Accept': 'application/json, application/xml, text/xml, image/png, image/jpeg, */*',
+  };
 
-    // Forward content-type so the browser can tell JSON from XML
+  const auth = getBasicAuth(parsed.hostname);
+  if (auth) headers['Authorization'] = auth;
+
+  try {
+    const upstream = await fetch(targetUrl, { headers, timeout: 30000 });
+
     const ct = upstream.headers.get('content-type');
     if (ct) res.setHeader('Content-Type', ct);
 
-    // Stream the body straight through
     upstream.body.pipe(res);
   } catch (err) {
     console.error('[proxy error]', err.message);
