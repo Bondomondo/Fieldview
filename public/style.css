@@ -805,13 +805,14 @@ html, body {
 /* ── Label Save / Load row ─────────────────────────────────── */
 .label-io-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   padding-top: 8px;
   border-top: 1px solid var(--border);
   margin-top: 4px;
 }
 .label-io-btn {
-  flex: 1;
+  flex: 1 1 120px;
   display: flex;
   align-items: center;
   justify-content: center;
