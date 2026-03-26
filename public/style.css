@@ -37,6 +37,8 @@
 
 /* ── Reset / Base ──────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+/* Ensure [hidden] always wins over display rules set by component CSS */
+[hidden] { display: none !important; }
 
 html, body {
   height: 100%;
