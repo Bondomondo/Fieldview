@@ -17,9 +17,12 @@ function nextColor() { return PALETTE[paletteIdx++ % PALETTE.length]; }
 
 // ── State ────────────────────────────────────────────────────
 const state = {
-  layers: [],     // { id, name, type, color, visible, leafletLayer, featureCount,
-                  //   wfsConfig?: { baseUrl, typeName } }
-  capsLayers: [], // from WFS GetCapabilities
+  layers: [],      // { id, name, type, color, visible, leafletLayer, featureCount,
+                   //   wfsConfig?: { baseUrl, typeName }, wmsConfig?: { baseUrl, layerName } }
+  capsLayers: [],  // from WFS/WMS GetCapabilities
+  serviceType: 'WFS',
+  currentUser: null,
+  firebaseReady: false,
 };
 
 // ── Map setup ────────────────────────────────────────────────
@@ -44,7 +47,7 @@ const basemaps = {
     maxZoom: 17,
   }),
 };
-basemaps.osm.addTo(map);
+basemaps.satellite.addTo(map);
 
 // ── Scale calculation ─────────────────────────────────────────
 // Returns the current map scale denominator (e.g. 10000 = 1:10 000)
@@ -729,7 +732,7 @@ function loadWmsLayer() {
   leafletLayer.getTileUrl = coords => '/proxy?url=' + encodeURIComponent(origGetTileUrl(coords));
 
   const color = nextColor();
-  addLayer({ name: displayName, type: 'WMS', color, leafletLayer, featureCount: null });
+  addLayer({ name: displayName, type: 'WMS', color, leafletLayer, featureCount: null, wmsConfig: { baseUrl: baseWmsUrl, layerName } });
 
   setStatus('caps-status', `Loaded WMS layer "${displayName}"`, 'success');
   toast(`Loaded WMS layer "${displayName}"`, 'success');
@@ -926,42 +929,87 @@ async function loadLabels(file) {
     toast(`Invalid label file: ${err.message}`, 'error', 5000);
     return;
   }
-  let labelCount = 0, kmzCount = 0;
-  for (const item of data) {
-    if (!item.name || !item.color || !Array.isArray(item.features)) continue;
-    const geojson = { type: 'FeatureCollection', features: item.features };
-    const color = item.color;
-    const layerName = item.name;
-    // Files saved before type field was added default to 'Label'
-    const layerType = item.type === 'KMZ/KML' ? 'KMZ/KML' : 'Label';
-
-    if (layerType === 'KMZ/KML') {
-      const leafletLayer = L.geoJSON(geojson, {
-        style: () => ({ color, weight: 2, opacity: 0.9, dashArray: '6 6', fillOpacity: 0 }),
-        pointToLayer: (_, latlng) => L.circleMarker(latlng, { radius: 6, color, weight: 2, dashArray: '4 4', fillOpacity: 0 }),
-        onEachFeature: (feat, layer) => { layer.on('click', () => showFeatureInfo(feat, layerName)); },
-      });
-      addLayer({ name: layerName, type: 'KMZ/KML', color, leafletLayer, featureCount: item.features.length });
-      kmzCount++;
-    } else {
-      const leafletLayer = L.geoJSON(geojson, {
-        style: () => ({ color, weight: 2, opacity: 0.9, fillColor: color, fillOpacity: 0.25 }),
-        pointToLayer: (_, latlng) => L.circleMarker(latlng, { radius: 6, color, weight: 2, fillColor: color, fillOpacity: 0.8 }),
-        onEachFeature: (feat, layer) => { layer.on('click', () => showFeatureInfo(feat, layerName)); },
-      });
-      addLayer({ name: layerName, type: 'Label', color, leafletLayer, featureCount: item.features.length });
-      labelCount++;
-    }
-  }
-  const total = labelCount + kmzCount;
+  const counts = restoreLayerArray(data);
+  const total = Object.values(counts).reduce((s, n) => s + n, 0);
   if (total) {
-    const parts = [];
-    if (labelCount) parts.push(`${labelCount} label layer${labelCount !== 1 ? 's' : ''}`);
-    if (kmzCount)   parts.push(`${kmzCount} KMZ/KML layer${kmzCount !== 1 ? 's' : ''}`);
-    toast(`Loaded ${parts.join(' and ')}`, 'success');
+    toast(`Loaded ${describeLayerCounts(counts)}`, 'success');
+    fitAll();
   } else {
     toast('No valid layers found in file', 'warning');
   }
+}
+
+// ── Shared layer restore helpers ──────────────────────────────
+
+/**
+ * Restore an array of serialized layer objects onto the map.
+ * Returns an object with counts by type: { label, kmz, wfs, wms }.
+ */
+function restoreLayerArray(items) {
+  const counts = { label: 0, kmz: 0, wfs: 0, wms: 0 };
+  for (const item of items) {
+    if (!item.name || !item.color) continue;
+    const type = item.type || 'Label';
+
+    if (type === 'WFS' && item.wfsConfig) {
+      // Re-add with saved config; live features will be fetched on the next moveend
+      addLayer({ name: item.name, type: 'WFS', color: item.color,
+        leafletLayer: L.geoJSON(), featureCount: 0, wfsConfig: item.wfsConfig });
+      counts.wfs++;
+    } else if (type === 'WMS' && item.wmsConfig) {
+      const { baseUrl, layerName } = item.wmsConfig;
+      const leafletLayer = L.tileLayer.wms(baseUrl, {
+        layers: layerName, format: 'image/png', transparent: true, version: '1.3.0',
+      });
+      const orig = leafletLayer.getTileUrl.bind(leafletLayer);
+      leafletLayer.getTileUrl = coords => '/proxy?url=' + encodeURIComponent(orig(coords));
+      addLayer({ name: item.name, type: 'WMS', color: item.color,
+        leafletLayer, featureCount: null, wmsConfig: item.wmsConfig });
+      counts.wms++;
+    } else if ((type === 'KMZ/KML' || type === 'Label') && Array.isArray(item.features)) {
+      const color = item.color;
+      const layerName = item.name;
+      const geojson = { type: 'FeatureCollection', features: item.features };
+      if (type === 'KMZ/KML') {
+        const leafletLayer = L.geoJSON(geojson, {
+          style: () => ({ color, weight: 2, opacity: 0.9, dashArray: '6 6', fillOpacity: 0 }),
+          pointToLayer: (_, latlng) => L.circleMarker(latlng, { radius: 6, color, weight: 2, dashArray: '4 4', fillOpacity: 0 }),
+          onEachFeature: (feat, layer) => { layer.on('click', () => showFeatureInfo(feat, layerName)); },
+        });
+        addLayer({ name: layerName, type: 'KMZ/KML', color, leafletLayer, featureCount: item.features.length });
+        counts.kmz++;
+      } else {
+        const leafletLayer = L.geoJSON(geojson, {
+          style: () => ({ color, weight: 2, opacity: 0.9, fillColor: color, fillOpacity: 0.25 }),
+          pointToLayer: (_, latlng) => L.circleMarker(latlng, { radius: 6, color, weight: 2, fillColor: color, fillOpacity: 0.8 }),
+          onEachFeature: (feat, layer) => { layer.on('click', () => showFeatureInfo(feat, layerName)); },
+        });
+        addLayer({ name: layerName, type: 'Label', color, leafletLayer, featureCount: item.features.length });
+        counts.label++;
+      }
+    }
+  }
+  return counts;
+}
+
+function serializeLayer(l) {
+  if (l.type === 'WFS') {
+    return { type: 'WFS', name: l.name, color: l.color, wfsConfig: l.wfsConfig };
+  }
+  if (l.type === 'WMS') {
+    return { type: 'WMS', name: l.name, color: l.color, wmsConfig: l.wmsConfig };
+  }
+  // Label / KMZ/KML — embed GeoJSON
+  return { type: l.type, name: l.name, color: l.color, features: l.leafletLayer.toGeoJSON().features };
+}
+
+function describeLayerCounts({ label = 0, kmz = 0, wfs = 0, wms = 0 }) {
+  const parts = [];
+  if (label) parts.push(`${label} label layer${label !== 1 ? 's' : ''}`);
+  if (kmz)   parts.push(`${kmz} KMZ/KML layer${kmz !== 1 ? 's' : ''}`);
+  if (wfs)   parts.push(`${wfs} WFS layer${wfs !== 1 ? 's' : ''}`);
+  if (wms)   parts.push(`${wms} WMS layer${wms !== 1 ? 's' : ''}`);
+  return parts.join(', ');
 }
 
 // ── GML → GeoJSON fallback ─────────────────────────────────────
@@ -1035,4 +1083,188 @@ function gmlPointToGeojson(el) {
   if (Math.abs(x) > 90) return { type: 'Point', coordinates: [y, x] };
   return { type: 'Point', coordinates: [x, y] };
 }
+
+// ── Firebase / Google Auth ────────────────────────────────────
+
+async function initFirebase() {
+  try {
+    const config = await fetch('/api/config').then(r => r.json());
+    if (!config.apiKey) return; // env vars not set — auth silently disabled
+    firebase.initializeApp(config);
+    state.firebaseReady = true;
+    firebase.auth().onAuthStateChanged(handleAuthChange);
+  } catch (e) {
+    console.warn('[firebase] not configured:', e.message);
+  }
+}
+
+function handleAuthChange(user) {
+  state.currentUser = user;
+  document.getElementById('btn-signin').hidden          = !!user;
+  document.getElementById('user-chip').hidden           = !user;
+  document.getElementById('btn-open-workspaces').hidden = !user;
+  if (user) {
+    document.getElementById('user-name').textContent = user.displayName ?? user.email;
+    document.getElementById('user-avatar').src       = user.photoURL ?? '';
+    document.getElementById('user-avatar').hidden    = !user.photoURL;
+  }
+}
+
+document.getElementById('btn-signin').addEventListener('click', () => {
+  if (!state.firebaseReady) { toast('Firebase is not configured', 'error'); return; }
+  firebase.auth().signInWithPopup(new firebase.auth.GoogleAuthProvider())
+    .catch(err => toast(`Sign-in failed: ${err.message}`, 'error', 6000));
+});
+
+document.getElementById('btn-signout').addEventListener('click', () => {
+  firebase.auth().signOut();
+});
+
+// ── Workspace modal ───────────────────────────────────────────
+
+document.getElementById('btn-open-workspaces').addEventListener('click', openWorkspacesModal);
+document.getElementById('btn-close-workspaces').addEventListener('click', closeWorkspacesModal);
+document.getElementById('workspaces-backdrop').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeWorkspacesModal();
+});
+document.getElementById('btn-save-workspace').addEventListener('click', handleSaveWorkspace);
+
+function openWorkspacesModal() {
+  document.getElementById('workspaces-backdrop').hidden = false;
+  refreshWorkspaceList();
+}
+
+function closeWorkspacesModal() {
+  document.getElementById('workspaces-backdrop').hidden = true;
+}
+
+async function handleSaveWorkspace() {
+  const name = document.getElementById('workspace-name-input').value.trim();
+  if (!name) { toast('Enter a workspace name', 'warning'); return; }
+  if (!state.currentUser) { toast('Sign in first', 'warning'); return; }
+  if (!state.layers.length) { toast('No layers to save', 'warning'); return; }
+
+  const btn = document.getElementById('btn-save-workspace');
+  btn.disabled = true;
+  try {
+    await saveWorkspace(name);
+    document.getElementById('workspace-name-input').value = '';
+    toast(`Saved workspace "${name}"`, 'success');
+    refreshWorkspaceList();
+  } catch (err) {
+    toast(`Save failed: ${err.message}`, 'error', 6000);
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function saveWorkspace(name) {
+  const layers = state.layers.map(serializeLayer).filter(Boolean);
+  // Firestore doesn't support nested arrays (present in GeoJSON coordinates).
+  // Store the whole payload as a JSON string to avoid this limitation.
+  await firebase.firestore()
+    .collection('users').doc(state.currentUser.uid)
+    .collection('workspaces')
+    .add({ name, savedAt: firebase.firestore.FieldValue.serverTimestamp(), layersJson: JSON.stringify(layers) });
+}
+
+async function refreshWorkspaceList() {
+  const el = document.getElementById('workspace-list');
+  el.innerHTML = '<p class="workspace-empty">Loading…</p>';
+  try {
+    const workspaces = await loadWorkspaceList();
+    if (!workspaces.length) {
+      el.innerHTML = '<p class="workspace-empty">No saved workspaces yet.</p>';
+      return;
+    }
+    el.innerHTML = workspaces.map(ws => {
+      const date = ws.savedAt?.toDate ? ws.savedAt.toDate().toLocaleDateString() : '–';
+      return `<div class="workspace-row" data-id="${escHtml(ws.id)}">
+        <div class="workspace-info">
+          <span class="workspace-name">${escHtml(ws.name)}</span>
+          <span class="workspace-date">${date}</span>
+        </div>
+        <div class="workspace-actions">
+          <button class="btn btn-accent btn-sm" data-action="load">Load</button>
+          <button class="btn btn-danger btn-sm btn-icon" data-action="delete" title="Delete">
+            ${trashSvg()}
+          </button>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (err) {
+    el.innerHTML = `<p class="workspace-empty">Failed to load: ${escHtml(err.message)}</p>`;
+  }
+}
+
+document.getElementById('workspace-list').addEventListener('click', async e => {
+  const btn = e.target.closest('[data-action]');
+  if (!btn) return;
+  const row = btn.closest('[data-id]');
+  const id  = row?.dataset.id;
+  if (!id) return;
+  if (btn.dataset.action === 'load') {
+    await handleLoadWorkspace(id, row.querySelector('.workspace-name')?.textContent);
+  } else if (btn.dataset.action === 'delete') {
+    await handleDeleteWorkspace(id, row.querySelector('.workspace-name')?.textContent);
+  }
+});
+
+async function handleLoadWorkspace(id, name) {
+  if (state.layers.length) {
+    const ok = confirm(`Loading "${name}" will clear all current layers. Continue?`);
+    if (!ok) return;
+  }
+  try {
+    const doc = await firebase.firestore()
+      .collection('users').doc(state.currentUser.uid)
+      .collection('workspaces').doc(id)
+      .get();
+    if (!doc.exists) { toast('Workspace not found', 'error'); return; }
+    // Clear existing layers
+    [...state.layers].forEach(l => removeLayer(l.id));
+    const raw    = doc.data();
+    const layers = raw.layersJson ? JSON.parse(raw.layersJson) : (raw.layers ?? []);
+    const counts = restoreLayerArray(layers);
+    const total  = Object.values(counts).reduce((s, n) => s + n, 0);
+    if (total) {
+      toast(`Loaded "${name}": ${describeLayerCounts(counts)}`, 'success');
+      fitAll();
+    } else {
+      toast('Workspace had no valid layers', 'warning');
+    }
+    closeWorkspacesModal();
+  } catch (err) {
+    toast(`Load failed: ${err.message}`, 'error', 6000);
+    console.error(err);
+  }
+}
+
+async function handleDeleteWorkspace(id, name) {
+  if (!confirm(`Delete workspace "${name}"?`)) return;
+  try {
+    await firebase.firestore()
+      .collection('users').doc(state.currentUser.uid)
+      .collection('workspaces').doc(id)
+      .delete();
+    toast(`Deleted "${name}"`, 'success');
+    refreshWorkspaceList();
+  } catch (err) {
+    toast(`Delete failed: ${err.message}`, 'error', 6000);
+  }
+}
+
+async function loadWorkspaceList() {
+  const snap = await firebase.firestore()
+    .collection('users').doc(state.currentUser.uid)
+    .collection('workspaces')
+    .orderBy('savedAt', 'desc')
+    .limit(50)
+    .get();
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+}
+
+// Kick off Firebase init
+initFirebase();
 
