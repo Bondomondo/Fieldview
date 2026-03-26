@@ -1160,10 +1160,12 @@ async function handleSaveWorkspace() {
 
 async function saveWorkspace(name) {
   const layers = state.layers.map(serializeLayer).filter(Boolean);
+  // Firestore doesn't support nested arrays (present in GeoJSON coordinates).
+  // Store the whole payload as a JSON string to avoid this limitation.
   await firebase.firestore()
     .collection('users').doc(state.currentUser.uid)
     .collection('workspaces')
-    .add({ name, savedAt: firebase.firestore.FieldValue.serverTimestamp(), layers });
+    .add({ name, savedAt: firebase.firestore.FieldValue.serverTimestamp(), layersJson: JSON.stringify(layers) });
 }
 
 async function refreshWorkspaceList() {
@@ -1221,7 +1223,9 @@ async function handleLoadWorkspace(id, name) {
     if (!doc.exists) { toast('Workspace not found', 'error'); return; }
     // Clear existing layers
     [...state.layers].forEach(l => removeLayer(l.id));
-    const counts = restoreLayerArray(doc.data().layers ?? []);
+    const raw    = doc.data();
+    const layers = raw.layersJson ? JSON.parse(raw.layersJson) : (raw.layers ?? []);
+    const counts = restoreLayerArray(layers);
     const total  = Object.values(counts).reduce((s, n) => s + n, 0);
     if (total) toast(`Loaded "${name}": ${describeLayerCounts(counts)}`, 'success');
     else toast('Workspace had no valid layers', 'warning');
