@@ -91,7 +91,97 @@ html, body {
   border: 1px solid var(--border);
 }
 
-.topbar-actions { display: flex; gap: 6px; }
+.topbar-actions { display: flex; gap: 6px; align-items: center; }
+
+/* ── Auth area ─────────────────────────────────────────────── */
+#auth-area { display: flex; align-items: center; gap: 8px; margin-left: 4px; }
+
+#user-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 3px 10px 3px 4px;
+}
+#user-chip:not([hidden]) { display: flex; }
+#user-avatar {
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+#user-name {
+  font-size: 13px;
+  color: var(--text-primary);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Workspace modal ───────────────────────────────────────── */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.65);
+  backdrop-filter: blur(4px);
+  z-index: 1500;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.modal-backdrop:not([hidden]) { display: flex; }
+
+.modal {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  width: 100%;
+  max-width: 480px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.modal-header h3 { margin: 0; font-size: 15px; }
+
+.modal-body {
+  padding: 16px 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.workspace-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.workspace-row:last-child { border-bottom: none; }
+
+.workspace-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.workspace-name { font-size: 14px; font-weight: 500; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-date { font-size: 12px; color: var(--text-muted); }
+
+.workspace-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+.workspace-empty { color: var(--text-muted); font-size: 13px; text-align: center; padding: 16px 0; margin: 0; }
+
+.mb-2 { margin-bottom: 8px; }
 
 /* ── Buttons ───────────────────────────────────────────────── */
 .btn {

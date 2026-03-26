@@ -29,7 +29,7 @@
       <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
       <polyline points="9 22 9 12 15 12 15 22"/>
     </svg>
-    <span class="brand-name">FieldView</span>
+    <span class="brand-name" style="color:#e53e3e">FieldView</span>
     <span class="brand-tagline">Farm Field Mapper</span>
   </div>
   <div class="topbar-actions">
@@ -43,6 +43,17 @@
     <button class="btn btn-ghost" id="btn-fit-all" title="Fit all layers">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
     </button>
+    <div id="auth-area">
+      <button id="btn-signin" class="btn btn-primary btn-sm">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        Sign in with Google
+      </button>
+      <div id="user-chip" hidden>
+        <img id="user-avatar" width="24" height="24" alt="" />
+        <span id="user-name"></span>
+        <button id="btn-signout" class="btn btn-ghost btn-sm">Sign out</button>
+      </div>
+    </div>
   </div>
 </header>
 
@@ -136,6 +147,10 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
             Load Labels
           </button>
+          <button class="btn btn-ghost btn-sm label-io-btn" id="btn-open-workspaces" title="Cloud workspaces" hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>
+            My Saves
+          </button>
           <input type="file" id="label-file-input" accept=".json" hidden />
         </div>
       </div>
@@ -222,8 +237,30 @@
   </div>
 </div>
 
+<!-- Workspaces modal -->
+<div class="modal-backdrop" id="workspaces-backdrop" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h3>My Saved Workspaces</h3>
+      <button class="btn-close" id="btn-close-workspaces">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="input-row mb-2">
+        <input id="workspace-name-input" type="text" placeholder="Workspace name…" maxlength="80" style="flex:1" />
+        <button id="btn-save-workspace" class="btn btn-accent btn-sm">Save current</button>
+      </div>
+      <div id="workspace-list"><p class="workspace-empty">No saved workspaces yet.</p></div>
+    </div>
+  </div>
+</div>
+
 <!-- Toast container -->
 <div class="toast-container" id="toast-container"></div>
+
+<!-- Firebase SDK (compat) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 
 <script type="module" src="app.js"></script>
 </body>
