@@ -47,7 +47,7 @@ const basemaps = {
     maxZoom: 17,
   }),
 };
-basemaps.osm.addTo(map);
+basemaps.satellite.addTo(map);
 
 // ── Scale calculation ─────────────────────────────────────────
 // Returns the current map scale denominator (e.g. 10000 = 1:10 000)
@@ -933,6 +933,7 @@ async function loadLabels(file) {
   const total = Object.values(counts).reduce((s, n) => s + n, 0);
   if (total) {
     toast(`Loaded ${describeLayerCounts(counts)}`, 'success');
+    fitAll();
   } else {
     toast('No valid layers found in file', 'warning');
   }
@@ -1227,8 +1228,12 @@ async function handleLoadWorkspace(id, name) {
     const layers = raw.layersJson ? JSON.parse(raw.layersJson) : (raw.layers ?? []);
     const counts = restoreLayerArray(layers);
     const total  = Object.values(counts).reduce((s, n) => s + n, 0);
-    if (total) toast(`Loaded "${name}": ${describeLayerCounts(counts)}`, 'success');
-    else toast('Workspace had no valid layers', 'warning');
+    if (total) {
+      toast(`Loaded "${name}": ${describeLayerCounts(counts)}`, 'success');
+      fitAll();
+    } else {
+      toast('Workspace had no valid layers', 'warning');
+    }
     closeWorkspacesModal();
   } catch (err) {
     toast(`Load failed: ${err.message}`, 'error', 6000);
