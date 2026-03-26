@@ -96,6 +96,47 @@ app.get('/proxy', async (req, res) => {
   }
 });
 
+// ── Share email ──────────────────────────────────────────────
+// POST /api/send-share-email  { to, shareUrl, shareName }
+// Requires RESEND_API_KEY env var (https://resend.com).
+// Optional: RESEND_FROM  (default: FieldView <onboarding@resend.dev>)
+app.post('/api/send-share-email', express.json(), async (req, res) => {
+  const { to, shareUrl, shareName } = req.body ?? {};
+  if (!to || !shareUrl) {
+    return res.status(400).json({ error: 'Missing to or shareUrl' });
+  }
+
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    return res.status(503).json({ error: 'Email service not configured (RESEND_API_KEY missing)' });
+  }
+
+  const from = process.env.RESEND_FROM || 'FieldView <onboarding@resend.dev>';
+  const subject = `FieldView map shared with you: ${shareName || 'Map'}`;
+  const html = `
+    <p>A FieldView map has been shared with you.</p>
+    <p><strong>${shareName || 'View map'}</strong></p>
+    <p><a href="${shareUrl}" style="background:#4caf71;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block">Open in FieldView</a></p>
+    <p style="color:#888;font-size:12px">Or copy this link: ${shareUrl}</p>
+  `;
+
+  try {
+    const r = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from, to: [to], subject, html }),
+    });
+    if (!r.ok) {
+      const body = await r.text();
+      throw new Error(`Resend ${r.status}: ${body}`);
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[send-share-email]', err.message);
+    res.status(502).json({ error: err.message });
+  }
+});
+
 // ── Firebase config ──────────────────────────────────────────
 // Exposes public Firebase client config from env vars so the frontend
 // can initialise Firebase without hard-coded credentials.

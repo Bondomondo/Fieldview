@@ -265,7 +265,21 @@ function renderLayerList() {
     ul.innerHTML = '<li class="layer-list-empty">No layers loaded yet</li>';
     return;
   }
-  ul.innerHTML = state.layers.map(l => `
+  const dataLayers  = state.layers.filter(l => l.type === 'WMS' || l.type === 'WFS');
+  const labelLayers = state.layers.filter(l => l.type !== 'WMS' && l.type !== 'WFS');
+
+  const renderGroup = (title, layers) => {
+    if (!layers.length) return '';
+    return `<li class="layer-group-header">${title}</li>` + layers.map(layerItemHtml).join('');
+  };
+
+  ul.innerHTML =
+    renderGroup('WMS / WFS Data Layers', dataLayers) +
+    renderGroup('Labels &amp; Boundaries', labelLayers);
+}
+
+function layerItemHtml(l) {
+  return `
     <li class="layer-item" data-id="${l.id}">
       ${layerSwatchHtml(l)}
       <div class="layer-item-info">
@@ -283,8 +297,7 @@ function renderLayerList() {
           ${trashSvg()}
         </button>
       </div>
-    </li>
-  `).join('');
+    </li>`;
 }
 
 function layerSwatchHtml(l) {
@@ -1093,6 +1106,8 @@ async function initFirebase() {
     firebase.initializeApp(config);
     state.firebaseReady = true;
     firebase.auth().onAuthStateChanged(handleAuthChange);
+    // Load a shared map if ?share= is present — works even without sign-in
+    maybeLoadSharedMap();
   } catch (e) {
     console.warn('[firebase] not configured:', e.message);
   }
@@ -1103,6 +1118,7 @@ function handleAuthChange(user) {
   document.getElementById('btn-signin').hidden          = !!user;
   document.getElementById('user-chip').hidden           = !user;
   document.getElementById('btn-open-workspaces').hidden = !user;
+  document.getElementById('btn-open-share').hidden      = !user;
   if (user) {
     document.getElementById('user-name').textContent = user.displayName ?? user.email;
     document.getElementById('user-avatar').src       = user.photoURL ?? '';
@@ -1132,14 +1148,42 @@ document.getElementById('btn-save-workspace').addEventListener('click', handleSa
 function openWorkspacesModal() {
   document.getElementById('workspaces-backdrop').hidden = false;
   refreshWorkspaceList();
+  refreshOverwriteSelect();
 }
+
+async function refreshOverwriteSelect() {
+  const sel = document.getElementById('workspace-overwrite-select');
+  sel.innerHTML = '<option value="">— New workspace —</option>';
+  if (!state.currentUser) return;
+  try {
+    const workspaces = await loadWorkspaceList();
+    workspaces.forEach(ws => {
+      const opt = document.createElement('option');
+      opt.value = ws.id;
+      opt.textContent = ws.name;
+      sel.appendChild(opt);
+    });
+  } catch {}
+}
+
+// When an existing workspace is selected, pre-fill the name input
+document.getElementById('workspace-overwrite-select').addEventListener('change', e => {
+  const sel = e.target;
+  const name = sel.options[sel.selectedIndex]?.text;
+  if (sel.value && name) {
+    document.getElementById('workspace-name-input').value = name;
+  } else {
+    document.getElementById('workspace-name-input').value = '';
+  }
+});
 
 function closeWorkspacesModal() {
   document.getElementById('workspaces-backdrop').hidden = true;
 }
 
 async function handleSaveWorkspace() {
-  const name = document.getElementById('workspace-name-input').value.trim();
+  const name        = document.getElementById('workspace-name-input').value.trim();
+  const overwriteId = document.getElementById('workspace-overwrite-select').value;
   if (!name) { toast('Enter a workspace name', 'warning'); return; }
   if (!state.currentUser) { toast('Sign in first', 'warning'); return; }
   if (!state.layers.length) { toast('No layers to save', 'warning'); return; }
@@ -1147,10 +1191,12 @@ async function handleSaveWorkspace() {
   const btn = document.getElementById('btn-save-workspace');
   btn.disabled = true;
   try {
-    await saveWorkspace(name);
+    await saveWorkspace(name, overwriteId || null);
     document.getElementById('workspace-name-input').value = '';
+    document.getElementById('workspace-overwrite-select').value = '';
     toast(`Saved workspace "${name}"`, 'success');
     refreshWorkspaceList();
+    refreshOverwriteSelect();
   } catch (err) {
     toast(`Save failed: ${err.message}`, 'error', 6000);
     console.error(err);
@@ -1159,14 +1205,15 @@ async function handleSaveWorkspace() {
   }
 }
 
-async function saveWorkspace(name) {
+async function saveWorkspace(name, overwriteId = null) {
   const layers = state.layers.map(serializeLayer).filter(Boolean);
-  // Firestore doesn't support nested arrays (present in GeoJSON coordinates).
-  // Store the whole payload as a JSON string to avoid this limitation.
-  await firebase.firestore()
-    .collection('users').doc(state.currentUser.uid)
-    .collection('workspaces')
-    .add({ name, savedAt: firebase.firestore.FieldValue.serverTimestamp(), layersJson: JSON.stringify(layers) });
+  const payload = { name, savedAt: firebase.firestore.FieldValue.serverTimestamp(), layersJson: JSON.stringify(layers) };
+  const col = firebase.firestore().collection('users').doc(state.currentUser.uid).collection('workspaces');
+  if (overwriteId) {
+    await col.doc(overwriteId).set(payload);
+  } else {
+    await col.add(payload);
+  }
 }
 
 async function refreshWorkspaceList() {
@@ -1263,6 +1310,94 @@ async function loadWorkspaceList() {
     .limit(50)
     .get();
   return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+}
+
+// ── Share map ─────────────────────────────────────────────────
+
+document.getElementById('btn-open-share').addEventListener('click', () => {
+  document.getElementById('share-link-row').hidden = true;
+  document.getElementById('share-backdrop').hidden = false;
+});
+document.getElementById('btn-close-share').addEventListener('click', () => {
+  document.getElementById('share-backdrop').hidden = true;
+});
+document.getElementById('share-backdrop').addEventListener('click', e => {
+  if (e.target === e.currentTarget) document.getElementById('share-backdrop').hidden = true;
+});
+
+document.getElementById('btn-copy-link').addEventListener('click', () => {
+  const input = document.getElementById('share-link-input');
+  navigator.clipboard.writeText(input.value)
+    .then(() => toast('Link copied', 'success'))
+    .catch(() => { input.select(); document.execCommand('copy'); toast('Link copied', 'success'); });
+});
+
+document.getElementById('btn-send-share').addEventListener('click', async () => {
+  if (!state.layers.length) { toast('No layers to share', 'warning'); return; }
+  if (!state.currentUser) { toast('Sign in to share a map', 'warning'); return; }
+
+  const name  = document.getElementById('share-name-input').value.trim() || 'Shared map';
+  const email = document.getElementById('share-email-input').value.trim();
+  if (!email) { toast('Enter a recipient email address', 'warning'); return; }
+
+  const btn = document.getElementById('btn-send-share');
+  btn.disabled = true;
+  btn.textContent = 'Sharing…';
+  try {
+    // Save to public /shared collection so the link is readable without auth
+    const layers = state.layers.map(serializeLayer).filter(Boolean);
+    const ref = await firebase.firestore().collection('shared').add({
+      name,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      layersJson: JSON.stringify(layers),
+    });
+
+    const shareUrl = `${window.location.origin}${window.location.pathname}?share=${ref.id}`;
+
+    // Show the link immediately so user can copy it even if email fails
+    document.getElementById('share-link-input').value = shareUrl;
+    document.getElementById('share-link-row').hidden = false;
+
+    // Send the email via the server
+    const resp = await fetch('/api/send-share-email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: email, shareUrl, shareName: name }),
+    });
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error ?? 'Email send failed');
+
+    toast(`Map shared with ${email}`, 'success');
+    document.getElementById('share-email-input').value = '';
+  } catch (err) {
+    toast(`Share failed: ${err.message}`, 'error', 6000);
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Share';
+  }
+});
+
+// Load a shared map from ?share=<id> on page load (after Firebase is ready)
+async function maybeLoadSharedMap() {
+  const shareId = new URLSearchParams(window.location.search).get('share');
+  if (!shareId) return;
+  try {
+    const doc = await firebase.firestore().collection('shared').doc(shareId).get();
+    if (!doc.exists) { toast('Shared map not found', 'error'); return; }
+    const data = doc.data();
+    const layers = data.layersJson ? JSON.parse(data.layersJson) : [];
+    const counts = restoreLayerArray(layers);
+    const total  = Object.values(counts).reduce((s, n) => s + n, 0);
+    if (total) {
+      toast(`Loaded shared map "${data.name}": ${describeLayerCounts(counts)}`, 'success', 6000);
+      fitAll();
+    }
+    // Remove share param from URL so refresh doesn't reload the shared map
+    history.replaceState(null, '', window.location.pathname);
+  } catch (err) {
+    console.error('[shared map]', err);
+  }
 }
 
 // Kick off Firebase init

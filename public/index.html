@@ -151,6 +151,10 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>
             My Saves
           </button>
+          <button class="btn btn-ghost btn-sm label-io-btn" id="btn-open-share" title="Share map" hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+            Share
+          </button>
           <input type="file" id="label-file-input" accept=".json" hidden />
         </div>
       </div>
@@ -237,6 +241,31 @@
   </div>
 </div>
 
+<!-- Share modal -->
+<div class="modal-backdrop" id="share-backdrop" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Share Map</h3>
+      <button class="btn-close" id="btn-close-share">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="input-group mb-2">
+        <label for="share-name-input">Map name</label>
+        <input id="share-name-input" type="text" placeholder="My map…" maxlength="80" />
+      </div>
+      <div class="input-group mb-2">
+        <label for="share-email-input">Recipient email</label>
+        <input id="share-email-input" type="email" placeholder="name@example.com" />
+      </div>
+      <div id="share-link-row" class="input-row mb-2" hidden>
+        <input id="share-link-input" type="text" readonly style="flex:1;font-size:12px" />
+        <button id="btn-copy-link" class="btn btn-ghost btn-sm">Copy</button>
+      </div>
+      <button id="btn-send-share" class="btn btn-accent" style="width:100%">Share</button>
+    </div>
+  </div>
+</div>
+
 <!-- Workspaces modal -->
 <div class="modal-backdrop" id="workspaces-backdrop" hidden>
   <div class="modal">
@@ -245,9 +274,15 @@
       <button class="btn-close" id="btn-close-workspaces">✕</button>
     </div>
     <div class="modal-body">
+      <div class="input-group mb-2">
+        <label for="workspace-overwrite-select">Save as</label>
+        <select id="workspace-overwrite-select">
+          <option value="">— New workspace —</option>
+        </select>
+      </div>
       <div class="input-row mb-2">
         <input id="workspace-name-input" type="text" placeholder="Workspace name…" maxlength="80" style="flex:1" />
-        <button id="btn-save-workspace" class="btn btn-accent btn-sm">Save current</button>
+        <button id="btn-save-workspace" class="btn btn-accent btn-sm">Save</button>
       </div>
       <div id="workspace-list"><p class="workspace-empty">No saved workspaces yet.</p></div>
     </div>
