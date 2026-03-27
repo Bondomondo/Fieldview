@@ -187,9 +187,7 @@ function openReport() {
 }
 
 function formatArea(m2) {
-  if (m2 >= 1_000_000) return (m2 / 1_000_000).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' km²';
-  if (m2 >= 10_000)    return (m2 / 10_000).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' ha';
-  return m2.toLocaleString(undefined, { maximumFractionDigits: 0 }) + ' m²';
+  return (m2 / 10_000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ha';
 }
 
 // ── Fit all ──────────────────────────────────────────────────
