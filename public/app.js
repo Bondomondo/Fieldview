@@ -537,10 +537,10 @@ async function handleFileUpload(file) {
       weight: 2,
       opacity: 0.9,
       dashArray: '6 6',
-      fillOpacity: 0,
+      fill: false,
     }),
     pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
-      radius: 6, color, weight: 2, dashArray: '4 4', fillOpacity: 0,
+      radius: 6, color, weight: 2, dashArray: '4 4', fill: false,
     }),
     onEachFeature: (feature, layer) => {
       layer.on('click', () => showFeatureInfo(feature, name));
@@ -985,8 +985,8 @@ function restoreLayerArray(items) {
       const geojson = { type: 'FeatureCollection', features: item.features };
       if (type === 'KMZ/KML') {
         const leafletLayer = L.geoJSON(geojson, {
-          style: () => ({ color, weight: 2, opacity: 0.9, dashArray: '6 6', fillOpacity: 0 }),
-          pointToLayer: (_, latlng) => L.circleMarker(latlng, { radius: 6, color, weight: 2, dashArray: '4 4', fillOpacity: 0 }),
+          style: () => ({ color, weight: 2, opacity: 0.9, dashArray: '6 6', fill: false }),
+          pointToLayer: (_, latlng) => L.circleMarker(latlng, { radius: 6, color, weight: 2, dashArray: '4 4', fill: false }),
           onEachFeature: (feat, layer) => { layer.on('click', () => showFeatureInfo(feat, layerName)); },
         });
         addLayer({ name: layerName, type: 'KMZ/KML', color, leafletLayer, featureCount: item.features.length });
