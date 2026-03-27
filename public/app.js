@@ -118,18 +118,43 @@ document.getElementById('report-backdrop').addEventListener('click', e => {
 });
 
 function openReport() {
-  const labels = state.layers.filter(l => l.type === 'Label');
+  const labels  = state.layers.filter(l => l.type === 'Label');
+  const kmzLayers = state.layers.filter(l => l.type === 'KMZ/KML');
   const body = document.getElementById('report-body');
 
-  if (!labels.length) {
+  if (!labels.length && !kmzLayers.length) {
     body.innerHTML = '<p class="report-empty">No label layers yet. Click a feature and assign a label to get started.</p>';
     document.getElementById('report-backdrop').hidden = false;
     return;
   }
 
-  body.innerHTML = labels.map(label => {
+  // ── KMZ/KML area summary ──────────────────────────────────
+  const kmzHtml = kmzLayers.map(layer => {
+    const features  = layer.leafletLayer.toGeoJSON().features;
+    const polygons  = features.filter(f => f.geometry &&
+      (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon'));
+    const totalM2   = polygons.reduce((sum, f) => sum + turf.area(f), 0);
+    const areaStr   = formatArea(totalM2);
+
+    return `
+      <div class="report-group">
+        <div class="report-group-header">
+          <svg width="20" height="12" viewBox="0 0 20 12" style="flex-shrink:0">
+            <line x1="1" y1="6" x2="19" y2="6" stroke="${layer.color}" stroke-width="2.5" stroke-dasharray="4 3" stroke-linecap="round"/>
+          </svg>
+          <span class="report-group-name">${escHtml(layer.name)}</span>
+          <span class="report-group-count">${features.length} feature${features.length !== 1 ? 's' : ''}</span>
+        </div>
+        <div class="report-area-row">
+          <span class="report-area-label">Total area</span>
+          <span class="report-area-value">${areaStr}</span>
+        </div>
+      </div>`;
+  }).join('');
+
+  // ── Label feature tables ──────────────────────────────────
+  const labelsHtml = labels.map(label => {
     const features = label.leafletLayer.toGeoJSON().features;
-    // Collect all unique property keys across features
     const keys = [...new Set(features.flatMap(f => Object.keys(f.properties || {})).filter(k => !k.startsWith('@')))];
 
     const thead = keys.length
@@ -157,7 +182,14 @@ function openReport() {
       </div>`;
   }).join('');
 
+  body.innerHTML = kmzHtml + labelsHtml;
   document.getElementById('report-backdrop').hidden = false;
+}
+
+function formatArea(m2) {
+  if (m2 >= 1_000_000) return (m2 / 1_000_000).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' km²';
+  if (m2 >= 10_000)    return (m2 / 10_000).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' ha';
+  return m2.toLocaleString(undefined, { maximumFractionDigits: 0 }) + ' m²';
 }
 
 // ── Fit all ──────────────────────────────────────────────────
