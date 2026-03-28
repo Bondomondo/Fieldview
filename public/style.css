@@ -963,6 +963,18 @@ html, body {
   margin-left: auto;
 }
 
+.report-area-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 6px 10px;
+  background: var(--bg-hover);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+.report-area-label { color: var(--text-muted); }
+.report-area-value { font-weight: 600; color: var(--text-primary); }
+
 .report-table {
   width: 100%;
   border-collapse: collapse;
