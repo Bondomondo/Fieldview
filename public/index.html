@@ -18,6 +18,9 @@
   <!-- Turf.js for bbox/centroid calculations -->
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
 
+  <!-- shpjs for Shapefile (.zip/.shp) → GeoJSON -->
+  <script src="https://unpkg.com/shpjs@latest/dist/shp.js"></script>
+
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -73,10 +76,10 @@
         <div class="drop-zone" id="drop-zone">
           <div class="drop-zone-inner">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-            <p>Drop KMZ file here</p>
+            <p>Drop KMZ, KML or Shapefile here</p>
             <span>or</span>
             <label class="btn btn-primary btn-sm" for="file-input">Browse file</label>
-            <input type="file" id="file-input" accept=".kmz,.kml" hidden />
+            <input type="file" id="file-input" accept=".kmz,.kml,.zip,.shp" hidden />
           </div>
         </div>
         <div class="uploaded-files" id="uploaded-files"></div>

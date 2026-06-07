@@ -522,6 +522,19 @@ function kmlTextToGeojson(kmlText, fileName) {
   return geojson;
 }
 
+async function parseShapefile(file) {
+  if (typeof shp === 'undefined') throw new Error('shpjs library not loaded');
+  const buf = await file.arrayBuffer();
+  const result = await shp(buf);
+  // shp() returns a single FeatureCollection or an array of them (multi-layer zip)
+  if (Array.isArray(result)) {
+    const features = result.flatMap(fc => fc.features ?? []);
+    return { type: 'FeatureCollection', features };
+  }
+  if (!result?.features) throw new Error('Could not parse shapefile');
+  return result;
+}
+
 // ── Drop zone ────────────────────────────────────────────────
 const dropZone = document.getElementById('drop-zone');
 const fileInput = document.getElementById('file-input');
@@ -531,8 +544,8 @@ dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-ove
 dropZone.addEventListener('drop', e => {
   e.preventDefault();
   dropZone.classList.remove('drag-over');
-  const files = Array.from(e.dataTransfer.files).filter(f => /\.(kmz|kml)$/i.test(f.name));
-  if (!files.length) { toast('Please drop a .kmz or .kml file', 'warning'); return; }
+  const files = Array.from(e.dataTransfer.files).filter(f => /\.(kmz|kml|zip|shp)$/i.test(f.name));
+  if (!files.length) { toast('Please drop a .kmz, .kml or shapefile (.zip/.shp)', 'warning'); return; }
   files.forEach(handleFileUpload);
 });
 fileInput.addEventListener('change', () => {
@@ -544,7 +557,11 @@ async function handleFileUpload(file) {
   showLoading(`Parsing ${file.name}…`);
   let geojson;
   try {
-    geojson = await parseKmzFile(file);
+    if (/\.(zip|shp)$/i.test(file.name)) {
+      geojson = await parseShapefile(file);
+    } else {
+      geojson = await parseKmzFile(file);
+    }
   } catch (err) {
     hideLoading();
     toast(`Error reading file: ${err.message}`, 'error', 5000);
@@ -560,7 +577,7 @@ async function handleFileUpload(file) {
   if (!count) { toast(`No features found in ${file.name}`, 'warning'); return; }
 
   const color = '#ff0000';
-  const name  = file.name.replace(/\.(kmz|kml)$/i, '');
+  const name  = file.name.replace(/\.(kmz|kml|zip|shp)$/i, '');
   const leafletLayer = L.geoJSON(geojson, {
     style: () => ({
       color,
