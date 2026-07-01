@@ -1,6 +1,12 @@
 /* ═══════════════════════════════════════════════════════════
-   FieldView – Farm Field Mapper  |  app.js
+   FieldView – Property Digital Twin  |  app.js
    ═══════════════════════════════════════════════════════════ */
+
+import { createProperty, layerKind, FOREST_TYPE } from './model.js';
+import {
+  parseForestandXml, joinForest, speciesName,
+  cuttingClassColor, FOREST_LAYER_COLOR,
+} from './forest-import.js';
 
 // ── Constants ────────────────────────────────────────────────
 const PROXY_BASE       = '/proxy?url=';
@@ -17,12 +23,13 @@ function nextColor() { return PALETTE[paletteIdx++ % PALETTE.length]; }
 
 // ── State ────────────────────────────────────────────────────
 const state = {
-  layers: [],      // { id, name, type, color, visible, leafletLayer, featureCount,
-                   //   wfsConfig?: { baseUrl, typeName }, wmsConfig?: { baseUrl, layerName } }
+  layers: [],      // { id, name, type, color, kind, visible, leafletLayer, featureCount,
+                   //   wfsConfig?, wmsConfig?, forestSummary? }
   capsLayers: [],  // from WFS/WMS GetCapabilities
   serviceType: 'WFS',
   currentUser: null,
   firebaseReady: false,
+  property: createProperty(),   // digital-twin metadata (name, propertyId, …)
 };
 
 // ── Map setup ────────────────────────────────────────────────
@@ -120,13 +127,16 @@ document.getElementById('report-backdrop').addEventListener('click', e => {
 function openReport() {
   const labels  = state.layers.filter(l => l.type === 'Label');
   const kmzLayers = state.layers.filter(l => l.type === 'KMZ/KML');
+  const forestLayers = state.layers.filter(l => l.type === FOREST_TYPE);
   const body = document.getElementById('report-body');
 
-  if (!labels.length && !kmzLayers.length) {
-    body.innerHTML = '<p class="report-empty">No label layers yet. Click a feature and assign a label to get started.</p>';
+  if (!labels.length && !kmzLayers.length && !forestLayers.length) {
+    body.innerHTML = '<p class="report-empty">Nothing to report yet. Upload fields or import forest data to get started.</p>';
     document.getElementById('report-backdrop').hidden = false;
     return;
   }
+
+  const summaryHtml = propertySummaryHtml();
 
   // ── KMZ/KML area summary ──────────────────────────────────
   const kmzHtml = kmzLayers.map(layer => {
@@ -182,12 +192,124 @@ function openReport() {
       </div>`;
   }).join('');
 
-  body.innerHTML = kmzHtml + labelsHtml;
+  body.innerHTML = summaryHtml + kmzHtml + labelsHtml;
   document.getElementById('report-backdrop').hidden = false;
+}
+
+// Property-wide summary block (fields + forest statistics).
+function propertySummaryHtml() {
+  const s = computePropertyStats();
+  const f = s.forest;
+
+  const card = (label, value) => `
+    <div class="stat-card"><div class="stat-value">${value}</div><div class="stat-label">${label}</div></div>`;
+
+  const cards = [
+    card('Field area', formatArea(s.fieldAreaM2)),
+    ...(f.standCount ? [
+      card('Forest area', `${f.areaHa.toLocaleString()} ha`),
+      card('Productive', `${f.productiveAreaHa.toLocaleString()} ha`),
+      card('Standing volume', `${f.volumeM3sk.toLocaleString()} m³sk`),
+      card('Stands', f.standCount),
+      card('Mean age', `${f.meanAge} yr`),
+    ] : []),
+  ].join('');
+
+  const distTable = (title, map, unit, total) => {
+    if (!map.size) return '';
+    const rows = [...map.entries()].sort((a, b) => b[1] - a[1]).map(([k, v]) => {
+      const pct = total ? Math.round((v / total) * 100) : 0;
+      return `<tr><td>${escHtml(k)}</td><td class="num">${(+v).toLocaleString(undefined, { maximumFractionDigits: 1 })}${unit}</td><td class="num">${pct}%</td></tr>`;
+    }).join('');
+    return `<div class="report-subtitle">${title}</div>
+      <table class="report-table"><tbody>${rows}</tbody></table>`;
+  };
+
+  const speciesTotal = [...f.species.values()].reduce((a, b) => a + b, 0);
+  const speciesTable = distTable('Species (by volume)', f.species, ' m³sk', speciesTotal);
+  const ageTable     = distTable('Age classes (by area)', f.ageClasses, ' ha', f.areaHa);
+  const cutTable     = distTable('Cutting classes (by area)', f.cutClasses, ' ha', f.areaHa);
+
+  const proposed = f.treatments.filter(t => /propos/i.test(t.status));
+  const treatmentsTable = proposed.length ? `
+    <div class="report-subtitle">Planned treatments (${proposed.length})</div>
+    <table class="report-table">
+      <thead><tr><th>Stand</th><th>Type</th><th>When</th><th class="num">Area</th></tr></thead>
+      <tbody>${proposed.map(t => `<tr>
+        <td>${escHtml(t.standNo || '—')}</td>
+        <td>${escHtml(t.type || '—')}</td>
+        <td>${escHtml(t.date || '')}${t.span ? ' · ' + escHtml(t.span) : ''}</td>
+        <td class="num">${t.areaHa} ha</td>
+      </tr>`).join('')}</tbody>
+    </table>` : '';
+
+  return `
+    <div class="report-property-header">
+      <h3>${escHtml(state.property.name)}</h3>
+      ${state.property.propertyId ? `<span class="report-property-id">${escHtml(state.property.propertyId)}</span>` : ''}
+    </div>
+    <div class="stat-cards">${cards}</div>
+    ${speciesTable}${ageTable}${cutTable}${treatmentsTable}`;
 }
 
 function formatArea(m2) {
   return (m2 / 10_000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ha';
+}
+
+// ── Property statistics ──────────────────────────────────────
+function fieldFeatures() {
+  return state.layers
+    .filter(l => (l.kind || layerKind(l.type)) === 'field')
+    .flatMap(l => { try { return l.leafletLayer.toGeoJSON().features; } catch { return []; } });
+}
+function forestFeatures() {
+  return state.layers
+    .filter(l => l.type === FOREST_TYPE)
+    .flatMap(l => { try { return l.leafletLayer.toGeoJSON().features; } catch { return []; } });
+}
+function ageBucket(age) {
+  if (age <= 20) return '0–20';
+  if (age <= 40) return '21–40';
+  if (age <= 60) return '41–60';
+  if (age <= 80) return '61–80';
+  if (age <= 100) return '81–100';
+  return '100+';
+}
+
+/** Aggregate property-wide numbers from the live layers. */
+function computePropertyStats() {
+  const fieldPolys = fieldFeatures().filter(f => f.geometry && /Polygon/.test(f.geometry.type));
+  const fieldAreaM2 = fieldPolys.reduce((s, f) => s + turf.area(f), 0);
+
+  const feats = forestFeatures();
+  let areaHa = 0, prodAreaHa = 0, volume = 0, ageAreaSum = 0, ageWeight = 0;
+  const species = new Map(), ageClasses = new Map(), cutClasses = new Map();
+  const treatments = [];
+  for (const f of feats) {
+    const p = f.properties || {};
+    const a = p.areaHa || 0;
+    areaHa += a;
+    prodAreaHa += p.productiveAreaHa || a;
+    const vol = p.totalVolumeM3sk || 0;
+    volume += vol;
+    if (p.meanAgeYr != null) {
+      ageAreaSum += p.meanAgeYr * a; ageWeight += a;
+      ageClasses.set(ageBucket(p.meanAgeYr), (ageClasses.get(ageBucket(p.meanAgeYr)) || 0) + a);
+    }
+    if (p.cuttingClass) cutClasses.set(p.cuttingClass, (cutClasses.get(p.cuttingClass) || 0) + a);
+    for (const s of (p.species || [])) species.set(s.name, (species.get(s.name) || 0) + vol * (s.pct / 100));
+    for (const t of (p.treatments || [])) treatments.push({ ...t, standNo: p.standNo, areaHa: a });
+  }
+
+  return {
+    fieldAreaM2, fieldCount: fieldPolys.length,
+    forest: {
+      areaHa: +areaHa.toFixed(1), productiveAreaHa: +prodAreaHa.toFixed(1),
+      volumeM3sk: Math.round(volume), standCount: feats.length,
+      meanAge: ageWeight ? Math.round(ageAreaSum / ageWeight) : 0,
+      species, ageClasses, cutClasses, treatments,
+    },
+  };
 }
 
 // ── Fit all ──────────────────────────────────────────────────
@@ -245,9 +367,12 @@ function setStatus(id, text, type = 'info') {
 }
 
 // ── Layer management ─────────────────────────────────────────
-function addLayer({ name, type, color, leafletLayer, featureCount, wfsConfig }) {
+function addLayer({ name, type, color, leafletLayer, featureCount, wfsConfig, wmsConfig, kind, forestSummary }) {
   const id = `layer-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-  const entry = { id, name, type, color, visible: true, leafletLayer, featureCount, wfsConfig };
+  const entry = {
+    id, name, type, color, visible: true, leafletLayer, featureCount,
+    wfsConfig, wmsConfig, forestSummary, kind: kind || layerKind(type),
+  };
   state.layers.push(entry);
   leafletLayer.addTo(map);
   renderLayerList();
@@ -289,14 +414,36 @@ function updateLayerCount() {
   document.getElementById('layer-count').textContent = state.layers.length;
 }
 
+// ── Property header ──────────────────────────────────────────
+function renderPropertyHeader() {
+  const nameEl = document.getElementById('property-name');
+  const idEl   = document.getElementById('property-id');
+  if (!nameEl) return;
+  nameEl.textContent = state.property.name;
+  idEl.textContent   = state.property.propertyId || '';
+  idEl.hidden        = !state.property.propertyId;
+
+  const stats = computePropertyStats();
+  const parts = [];
+  if (stats.fieldAreaM2 > 0) parts.push(`<span title="Total field area">🟩 ${formatArea(stats.fieldAreaM2)} fields</span>`);
+  if (stats.forest.standCount > 0) {
+    parts.push(`<span title="Forest">🌲 ${stats.forest.areaHa.toLocaleString()} ha · ${stats.forest.volumeM3sk.toLocaleString()} m³sk</span>`);
+  }
+  document.getElementById('property-totals').innerHTML =
+    parts.join('') || '<span>No data yet — add fields or import forest</span>';
+}
+
 function renderLayerList() {
+  renderPropertyHeader();
   const ul = document.getElementById('layer-list');
   if (state.layers.length === 0) {
     ul.innerHTML = '<li class="layer-list-empty">No layers loaded yet</li>';
     return;
   }
-  const dataLayers  = state.layers.filter(l => l.type === 'WMS' || l.type === 'WFS');
-  const labelLayers = state.layers.filter(l => l.type !== 'WMS' && l.type !== 'WFS');
+  const kindOf       = l => l.kind || layerKind(l.type);
+  const fieldLayers  = state.layers.filter(l => kindOf(l) === 'field');
+  const forestLayers = state.layers.filter(l => kindOf(l) === 'forestStand');
+  const dataLayers   = state.layers.filter(l => kindOf(l) === 'data');
 
   const renderGroup = (title, layers) => {
     if (!layers.length) return '';
@@ -304,8 +451,9 @@ function renderLayerList() {
   };
 
   ul.innerHTML =
-    renderGroup('WMS / WFS Data Layers', dataLayers) +
-    renderGroup('Labels &amp; Boundaries', labelLayers);
+    renderGroup('Fields &amp; Boundaries', fieldLayers) +
+    renderGroup('Forest Stands', forestLayers) +
+    renderGroup('WMS / WFS Data Layers', dataLayers);
 }
 
 function layerItemHtml(l) {
@@ -314,7 +462,7 @@ function layerItemHtml(l) {
       ${layerSwatchHtml(l)}
       <div class="layer-item-info">
         <div class="layer-item-name" title="${l.name}">${l.name}</div>
-        <div class="layer-item-meta">${l.featureCount != null ? l.featureCount + ' features · ' : ''}${l.type}${l.wfsConfig ? ' · live' : ''}</div>
+        <div class="layer-item-meta">${layerMetaText(l)}</div>
       </div>
       <div class="layer-item-actions">
         <button class="btn-layer-vis ${l.visible ? '' : 'hidden-layer'}" data-action="vis" data-id="${l.id}" title="${l.visible ? 'Hide' : 'Show'}">
@@ -330,11 +478,24 @@ function layerItemHtml(l) {
     </li>`;
 }
 
+function layerMetaText(l) {
+  if (l.type === FOREST_TYPE && l.forestSummary) {
+    const s = l.forestSummary;
+    return `${s.standCount} stands · ${formatArea(s.areaHa * 10_000)} · ${s.volumeM3sk.toLocaleString()} m³sk`;
+  }
+  const count = l.featureCount != null ? l.featureCount + ' features · ' : '';
+  return `${count}${l.type}${l.wfsConfig ? ' · live' : ''}`;
+}
+
 function layerSwatchHtml(l) {
   if (l.type === 'KMZ/KML') {
     return `<svg width="20" height="12" viewBox="0 0 20 12" style="flex-shrink:0" aria-hidden="true">
       <line x1="1" y1="6" x2="19" y2="6" stroke="${l.color}" stroke-width="2.5" stroke-dasharray="4 3" stroke-linecap="round"/>
     </svg>`;
+  }
+  if (l.type === FOREST_TYPE) {
+    return `<svg width="16" height="16" viewBox="0 0 24 24" style="flex-shrink:0" fill="${l.color}" aria-hidden="true">
+      <path d="M12 2l4 6h-2l3 5h-2l3 5H9v3H7v-3H3l3-5H4l3-5H5z"/></svg>`;
   }
   return `<div class="layer-item-color" style="background:${l.color}"></div>`;
 }
@@ -421,7 +582,66 @@ function showFeatureInfo(feature, layerName) {
       ${entries.map(([k, v]) => `<tr><td>${escHtml(k)}</td><td>${escHtml(String(v ?? ''))}</td></tr>`).join('')}
     </tbody></table>`;
   }
+  document.querySelector('.label-assign-section').hidden = false;
   populateLabelSelect();
+  document.getElementById('feature-info').hidden = false;
+}
+
+// Forest-stand variant: reuses the feature-info panel but renders a rich,
+// forestry-specific body and hides the label-assign controls.
+function showForestStandInfo(props) {
+  _currentFeature = null;
+  document.getElementById('feature-info-title').textContent =
+    props.standNo ? `Stand ${props.standNo}` : 'Forest stand';
+
+  const fmt = (v, unit = '') => (v == null || v === '' ? '—' : `${v}${unit}`);
+  const rows = [
+    ['Skifte', fmt(props.skifte)],
+    ['Land use', fmt(props.landUse)],
+    ['Area', `${fmt(props.areaHa, ' ha')}`],
+    ['Productive area', fmt(props.productiveAreaHa, ' ha')],
+    ['Cutting class (HKL)', fmt(props.cuttingClass)],
+    ['Goal class', fmt(props.goalClass)],
+    ['Mean age', fmt(props.meanAgeYr, ' yr')],
+    ['Dominant height', fmt(props.dominantHeightM, ' m')],
+    ['Basal area', fmt(props.basalAreaM2Ha, ' m²/ha')],
+    ['Volume', fmt(props.volumeM3PerHa, ' m³sk/ha')],
+    ['Total volume', props.totalVolumeM3sk != null ? `${props.totalVolumeM3sk.toLocaleString()} m³sk` : '—'],
+    ['Site index', fmt(props.siteIndex)],
+    ['Management class', fmt(props.managementClass)],
+    ['Maturity class', fmt(props.maturityClass)],
+    ['Soil moisture', fmt(props.soilMoisture)],
+  ];
+
+  const speciesHtml = (props.species || []).length
+    ? `<div class="stand-section-title">Species mix (by volume)</div>
+       ${props.species.map(s => `
+         <div class="species-row">
+           <span class="species-name">${escHtml(s.name)}</span>
+           <span class="species-bar"><span style="width:${Math.min(100, s.pct)}%"></span></span>
+           <span class="species-pct">${s.pct}%</span>
+         </div>`).join('')}`
+    : '';
+
+  const treatmentsHtml = (props.treatments || []).length
+    ? `<div class="stand-section-title">Treatments</div>
+       <table class="prop-table"><tbody>
+         ${props.treatments.map(t => `<tr>
+           <td>${escHtml(t.status || '—')}</td>
+           <td>${escHtml(t.type || '—')}</td>
+           <td>${escHtml(t.date || '')}</td>
+         </tr>`).join('')}
+       </tbody></table>`
+    : '';
+
+  document.getElementById('feature-info-body').innerHTML = `
+    <table class="prop-table"><tbody>
+      ${rows.map(([k, v]) => `<tr><td>${escHtml(k)}</td><td>${escHtml(String(v))}</td></tr>`).join('')}
+    </tbody></table>
+    ${speciesHtml}
+    ${treatmentsHtml}`;
+
+  document.querySelector('.label-assign-section').hidden = true;
   document.getElementById('feature-info').hidden = false;
 }
 
@@ -611,6 +831,83 @@ function addUploadedFileBadge(name, color, count) {
     <span class="file-count">${count} ft</span>
   `;
   document.getElementById('uploaded-files').appendChild(el);
+}
+
+// ── Forest import (shapefile + Forestand XML) ────────────────
+document.getElementById('btn-import-forest').addEventListener('click', handleForestImport);
+['forest-shp', 'forest-xml'].forEach(id =>
+  document.getElementById(id).addEventListener('change', updateForestFilesLabel));
+
+function updateForestFilesLabel() {
+  const parts = [];
+  const shp = document.getElementById('forest-shp').files[0];
+  const xml = document.getElementById('forest-xml').files[0];
+  if (shp) parts.push(`▪ ${shp.name}`);
+  if (xml) parts.push(`▪ ${xml.name}`);
+  document.getElementById('forest-import-files').textContent = parts.join('   ');
+}
+
+async function handleForestImport() {
+  const shpFile = document.getElementById('forest-shp').files[0];
+  const xmlFile = document.getElementById('forest-xml').files[0];
+  if (!shpFile) { toast('Select a forest shapefile (.zip or .shp)', 'warning'); return; }
+
+  showLoading('Importing forest data…');
+  let result;
+  try {
+    const [geojson, xmlResult] = await Promise.all([
+      parseShapefile(shpFile),
+      xmlFile ? xmlFile.text().then(parseForestandXml) : Promise.resolve(null),
+    ]);
+    if (!geojson.features?.length) throw new Error('No polygons in shapefile');
+    result = joinForest(geojson, xmlResult, turf);
+  } catch (err) {
+    hideLoading();
+    toast(`Forest import failed: ${err.message}`, 'error', 6000);
+    console.error(err);
+    return;
+  }
+  hideLoading();
+
+  // Adopt property metadata from the XML if we don't have a real name yet
+  if (result.propertyName && state.property.name === 'My Property') {
+    state.property.name = result.propertyName;
+    state.property.propertyId = result.propertyId;
+    renderPropertyHeader();
+  }
+
+  const name = result.propertyName ? `Forest — ${result.propertyName}` : 'Forest stands';
+  const leafletLayer = buildForestStandLayer(result.features);
+  addLayer({
+    name, type: FOREST_TYPE, color: FOREST_LAYER_COLOR, kind: 'forestStand',
+    leafletLayer, featureCount: result.summary.standCount, forestSummary: result.summary,
+  });
+
+  try { map.fitBounds(leafletLayer.getBounds(), { padding: [40, 40] }); } catch {}
+
+  const u = result.unmatched;
+  let msg = `Imported ${result.summary.standCount} stands · ${result.summary.areaHa} ha · ${result.summary.volumeM3sk.toLocaleString()} m³sk`;
+  if (u.noAttrs.length) msg += ` · ${u.noAttrs.length} without XML data`;
+  toast(msg, 'success', 6000);
+  if (u.noGeom.length) console.warn('[forest] XML stands without geometry:', u.noGeom);
+
+  document.getElementById('forest-shp').value = '';
+  document.getElementById('forest-xml').value = '';
+  document.getElementById('forest-import-files').textContent = '';
+}
+
+function buildForestStandLayer(features) {
+  return L.geoJSON({ type: 'FeatureCollection', features }, {
+    style: feature => {
+      const color = cuttingClassColor(feature.properties?.cuttingClass);
+      return { color, weight: 1.5, opacity: 0.9, fillColor: color, fillOpacity: 0.45 };
+    },
+    onEachFeature: (feature, layer) => {
+      layer.on('click', () => showForestStandInfo(feature.properties));
+      layer.on('mouseover', function () { this.setStyle({ fillOpacity: 0.7, weight: 2.5 }); });
+      layer.on('mouseout',  function () { this.setStyle({ fillOpacity: 0.45, weight: 1.5 }); });
+    },
+  });
 }
 
 // ── WFS GetCapabilities ──────────────────────────────────────
@@ -958,26 +1255,22 @@ document.getElementById('label-file-input').addEventListener('change', e => {
 });
 
 function saveLabels() {
-  const saveable = state.layers.filter(l => l.type === 'Label' || l.type === 'KMZ/KML');
-  if (!saveable.length) { toast('No label or KMZ/KML layers to save', 'warning'); return; }
-  const data = saveable.map(l => ({
-    type: l.type,
-    name: l.name,
-    color: l.color,
-    features: l.leafletLayer.toGeoJSON().features,
-  }));
+  const saveable = state.layers.filter(l =>
+    l.type === 'Label' || l.type === 'KMZ/KML' || l.type === FOREST_TYPE);
+  if (!saveable.length) { toast('No fields, forest or label layers to save', 'warning'); return; }
+  const data = saveable.map(serializeLayer);
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `fieldview-labels-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = `fieldview-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
-  const labelCount = saveable.filter(l => l.type === 'Label').length;
-  const kmzCount   = saveable.filter(l => l.type === 'KMZ/KML').length;
-  const parts = [];
-  if (labelCount) parts.push(`${labelCount} label layer${labelCount !== 1 ? 's' : ''}`);
-  if (kmzCount)   parts.push(`${kmzCount} KMZ/KML layer${kmzCount !== 1 ? 's' : ''}`);
-  toast(`Saved ${parts.join(' and ')}`, 'success');
+  const counts = {
+    label:  saveable.filter(l => l.type === 'Label').length,
+    kmz:    saveable.filter(l => l.type === 'KMZ/KML').length,
+    forest: saveable.filter(l => l.type === FOREST_TYPE).length,
+  };
+  toast(`Saved ${describeLayerCounts(counts)}`, 'success');
 }
 
 async function loadLabels(file) {
@@ -1006,12 +1299,22 @@ async function loadLabels(file) {
  * Returns an object with counts by type: { label, kmz, wfs, wms }.
  */
 function restoreLayerArray(items) {
-  const counts = { label: 0, kmz: 0, wfs: 0, wms: 0 };
+  const counts = { label: 0, kmz: 0, wfs: 0, wms: 0, forest: 0 };
   for (const item of items) {
     if (!item.name || !item.color) continue;
     const type = item.type || 'Label';
 
-    if (type === 'WFS' && item.wfsConfig) {
+    if (type === FOREST_TYPE && Array.isArray(item.features)) {
+      const summary = item.forestSummary || {
+        standCount: item.features.length,
+        areaHa: +item.features.reduce((s, f) => s + (f.properties?.areaHa || 0), 0).toFixed(1),
+        volumeM3sk: Math.round(item.features.reduce((s, f) => s + (f.properties?.totalVolumeM3sk || 0), 0)),
+      };
+      const leafletLayer = buildForestStandLayer(item.features);
+      addLayer({ name: item.name, type: FOREST_TYPE, color: item.color, kind: 'forestStand',
+        leafletLayer, featureCount: item.features.length, forestSummary: summary });
+      counts.forest++;
+    } else if (type === 'WFS' && item.wfsConfig) {
       // Re-add with saved config; live features will be fetched on the next moveend
       addLayer({ name: item.name, type: 'WFS', color: item.color,
         leafletLayer: L.geoJSON(), featureCount: 0, wfsConfig: item.wfsConfig });
@@ -1059,16 +1362,21 @@ function serializeLayer(l) {
   if (l.type === 'WMS') {
     return { type: 'WMS', name: l.name, color: l.color, wmsConfig: l.wmsConfig };
   }
+  if (l.type === FOREST_TYPE) {
+    return { type: FOREST_TYPE, name: l.name, color: l.color,
+      forestSummary: l.forestSummary, features: l.leafletLayer.toGeoJSON().features };
+  }
   // Label / KMZ/KML — embed GeoJSON
   return { type: l.type, name: l.name, color: l.color, features: l.leafletLayer.toGeoJSON().features };
 }
 
-function describeLayerCounts({ label = 0, kmz = 0, wfs = 0, wms = 0 }) {
+function describeLayerCounts({ label = 0, kmz = 0, wfs = 0, wms = 0, forest = 0 }) {
   const parts = [];
-  if (label) parts.push(`${label} label layer${label !== 1 ? 's' : ''}`);
-  if (kmz)   parts.push(`${kmz} KMZ/KML layer${kmz !== 1 ? 's' : ''}`);
-  if (wfs)   parts.push(`${wfs} WFS layer${wfs !== 1 ? 's' : ''}`);
-  if (wms)   parts.push(`${wms} WMS layer${wms !== 1 ? 's' : ''}`);
+  if (label)  parts.push(`${label} label layer${label !== 1 ? 's' : ''}`);
+  if (kmz)    parts.push(`${kmz} KMZ/KML layer${kmz !== 1 ? 's' : ''}`);
+  if (forest) parts.push(`${forest} forest layer${forest !== 1 ? 's' : ''}`);
+  if (wfs)    parts.push(`${wfs} WFS layer${wfs !== 1 ? 's' : ''}`);
+  if (wms)    parts.push(`${wms} WMS layer${wms !== 1 ? 's' : ''}`);
   return parts.join(', ');
 }
 
@@ -1447,6 +1755,7 @@ async function maybeLoadSharedMap() {
   }
 }
 
-// Kick off Firebase init
+// Initial paint of the property header, then kick off Firebase init
+renderPropertyHeader();
 initFirebase();
 
