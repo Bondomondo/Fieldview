@@ -1177,6 +1177,65 @@ html, body {
 .species-bar > span { display: block; height: 100%; background: var(--accent-green); border-radius: 4px; }
 .species-pct { flex: 0 0 40px; text-align: right; color: var(--text-secondary); }
 
+/* ── Analysis modal ────────────────────────────────────────── */
+.analysis-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+.analysis-toolbar .input-group { margin: 0; flex: 1 1 150px; }
+.analysis-toolbar label { display: block; font-size: 11px; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .04em; }
+.analysis-hint { font-size: 12px; color: var(--text-muted); margin: 4px 0 12px; }
+.analysis-bars { display: flex; flex-direction: column; gap: 6px; }
+.analysis-bar-row {
+  display: grid;
+  grid-template-columns: 150px 1fr 90px 44px;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background .12s ease;
+}
+.analysis-bar-row:hover { background: var(--bg-hover); }
+.analysis-bar-label { font-size: 12px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.analysis-bar-track { height: 16px; background: var(--bg-elevated); border-radius: 4px; overflow: hidden; }
+.analysis-bar-fill { height: 100%; border-radius: 4px; min-width: 2px; transition: width .2s ease; }
+.analysis-bar-value { font-size: 12px; color: var(--text-secondary); text-align: right; white-space: nowrap; }
+.analysis-bar-pct { font-size: 12px; color: var(--text-muted); text-align: right; }
+
+/* ── Highlight-clear button (over map) ─────────────────────── */
+.clear-highlight {
+  position: absolute;
+  top: 16px; left: 50%;
+  transform: translateX(-50%);
+  z-index: 620;
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 14px;
+  background: var(--accent-amber);
+  color: #1a1400;
+  border: none;
+  border-radius: 999px;
+  font-size: 13px; font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+}
+.clear-highlight:hover { filter: brightness(1.06); }
+.clear-highlight svg { width: 15px; height: 15px; }
+
+@media print {
+  .analysis-bar-fill { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .analysis-bar-label, .analysis-bar-value { color: #000 !important; }
+  .analysis-toolbar { display: none !important; }
+}
+
+@media (max-width: 700px) {
+  .analysis-bar-row { grid-template-columns: 110px 1fr 70px 36px; gap: 6px; }
+}
+
 @media print {
   .stat-card { border: 1px solid #ccc !important; }
   .stat-value { color: #000 !important; }

@@ -7,6 +7,7 @@ import {
   parseForestandXml, joinForest, speciesName,
   cuttingClassColor, FOREST_LAYER_COLOR,
 } from './forest-import.js';
+import { analyze, listSkiften, DIMENSIONS, MEASURES } from './analysis.js';
 
 // ── Constants ────────────────────────────────────────────────
 const PROXY_BASE       = '/proxy?url=';
@@ -123,6 +124,88 @@ document.getElementById('btn-print-report').addEventListener('click', () => wind
 document.getElementById('report-backdrop').addEventListener('click', e => {
   if (e.target === e.currentTarget) e.currentTarget.hidden = true;
 });
+
+// ── Analysis modal ───────────────────────────────────────────
+(function initAnalysisControls() {
+  const dimSel = document.getElementById('analysis-dimension');
+  const meaSel = document.getElementById('analysis-measure');
+  dimSel.innerHTML = DIMENSIONS.map(d => `<option value="${d.key}">${d.label}</option>`).join('');
+  meaSel.innerHTML = MEASURES.map(m => `<option value="${m.key}">${m.label}</option>`).join('');
+  dimSel.addEventListener('change', renderAnalysis);
+  meaSel.addEventListener('change', renderAnalysis);
+  document.getElementById('analysis-skifte').addEventListener('change', renderAnalysis);
+})();
+
+document.getElementById('btn-analysis').addEventListener('click', openAnalysis);
+document.getElementById('close-analysis').addEventListener('click', () => {
+  document.getElementById('analysis-backdrop').hidden = true;
+});
+document.getElementById('btn-print-analysis').addEventListener('click', () => window.print());
+document.getElementById('analysis-backdrop').addEventListener('click', e => {
+  if (e.target === e.currentTarget) e.currentTarget.hidden = true;
+});
+// Clicking a bar highlights the matching stands on the map.
+document.getElementById('analysis-body').addEventListener('click', e => {
+  const row = e.target.closest('[data-stands]');
+  if (!row) return;
+  const stands = row.dataset.stands ? row.dataset.stands.split(',').filter(Boolean) : [];
+  if (!stands.length) return;
+  highlightStands(stands, row.dataset.label);
+  document.getElementById('analysis-backdrop').hidden = true;
+  toast(`Markerade ${stands.length} bestånd på kartan`, 'info');
+});
+
+function openAnalysis() {
+  const feats = forestFeatures();
+  if (!feats.length) {
+    toast('Importera skogsdata först för att analysera', 'warning');
+    return;
+  }
+  // Refresh the skifte filter to what's currently loaded.
+  const skiften = listSkiften(feats);
+  document.getElementById('analysis-skifte').innerHTML =
+    `<option value="">Alla skiften</option>` +
+    skiften.map(s => `<option value="${escHtml(s)}">Skifte ${escHtml(s)}</option>`).join('');
+
+  renderAnalysis();
+  document.getElementById('analysis-backdrop').hidden = false;
+}
+
+function renderAnalysis() {
+  const feats = forestFeatures();
+  const dimension = document.getElementById('analysis-dimension').value;
+  const measure   = document.getElementById('analysis-measure').value;
+  const skifte    = document.getElementById('analysis-skifte').value || null;
+  const measureMeta = MEASURES.find(m => m.key === measure);
+  const unit = measureMeta.unit;
+
+  const res = analyze(feats, dimension, measure, skifte);
+  const max = Math.max(1, ...res.rows.map(r => r.value));
+
+  const fmt = v => v.toLocaleString(undefined, { maximumFractionDigits: measure === 'count' ? 0 : 1 });
+
+  const cards = `
+    <div class="stat-cards">
+      <div class="stat-card"><div class="stat-value">${res.standCount}</div><div class="stat-label">Bestånd</div></div>
+      <div class="stat-card"><div class="stat-value">${res.areaHa.toLocaleString()} ha</div><div class="stat-label">Areal</div></div>
+      <div class="stat-card"><div class="stat-value">${res.volumeM3sk.toLocaleString()}</div><div class="stat-label">m³sk</div></div>
+    </div>`;
+
+  const bars = res.rows.map(r => `
+    <div class="analysis-bar-row" data-stands="${escHtml(r.standNos.join(','))}" data-label="${escHtml(r.label)}" title="Visa ${escHtml(r.label)} på kartan">
+      <div class="analysis-bar-label">${escHtml(r.label)}</div>
+      <div class="analysis-bar-track">
+        <div class="analysis-bar-fill" style="width:${(r.value / max) * 100}%;background:${r.color}"></div>
+      </div>
+      <div class="analysis-bar-value">${fmt(r.value)} ${unit}</div>
+      <div class="analysis-bar-pct">${r.pct}%</div>
+    </div>`).join('');
+
+  document.getElementById('analysis-body').innerHTML = `
+    ${cards}
+    <p class="analysis-hint">Klicka på en stapel för att markera bestånden på kartan.</p>
+    <div class="analysis-bars">${bars || '<p class="report-empty">Ingen data för detta urval.</p>'}</div>`;
+}
 
 function openReport() {
   const labels  = state.layers.filter(l => l.type === 'Label');
@@ -896,19 +979,62 @@ async function handleForestImport() {
   document.getElementById('forest-import-files').textContent = '';
 }
 
+// Active analysis highlight: a Set of stand numbers, or null for none.
+let _standHighlight = null;
+
+function forestStandStyle(props) {
+  const color = cuttingClassColor(props?.cuttingClass);
+  if (_standHighlight) {
+    if (_standHighlight.has(props?.standNo)) {
+      return { color: '#ffd23f', weight: 3, opacity: 1, fillColor: color, fillOpacity: 0.75 };
+    }
+    return { color, weight: 0.5, opacity: 0.3, fillColor: color, fillOpacity: 0.08 };
+  }
+  return { color, weight: 1.5, opacity: 0.9, fillColor: color, fillOpacity: 0.45 };
+}
+
 function buildForestStandLayer(features) {
   return L.geoJSON({ type: 'FeatureCollection', features }, {
-    style: feature => {
-      const color = cuttingClassColor(feature.properties?.cuttingClass);
-      return { color, weight: 1.5, opacity: 0.9, fillColor: color, fillOpacity: 0.45 };
-    },
+    style: feature => forestStandStyle(feature.properties),
     onEachFeature: (feature, layer) => {
       layer.on('click', () => showForestStandInfo(feature.properties));
-      layer.on('mouseover', function () { this.setStyle({ fillOpacity: 0.7, weight: 2.5 }); });
-      layer.on('mouseout',  function () { this.setStyle({ fillOpacity: 0.45, weight: 1.5 }); });
+      layer.on('mouseover', function () { this.setStyle({ weight: 3, fillOpacity: 0.7 }); this.bringToFront(); });
+      layer.on('mouseout',  function () { this.setStyle(forestStandStyle(feature.properties)); });
     },
   });
 }
+
+// Re-apply styles to every forest layer (after a highlight change).
+function restyleForest() {
+  state.layers.filter(l => l.type === FOREST_TYPE)
+    .forEach(l => l.leafletLayer.setStyle(f => forestStandStyle(f.properties)));
+}
+
+function highlightStands(standNos, label) {
+  _standHighlight = new Set(standNos);
+  restyleForest();
+  const btn = document.getElementById('clear-highlight');
+  document.getElementById('clear-highlight-label').textContent =
+    label ? `${label} (${standNos.length})` : `Markerade (${standNos.length})`;
+  btn.hidden = false;
+  // Zoom to the highlighted stands
+  const bounds = L.latLngBounds([]);
+  state.layers.filter(l => l.type === FOREST_TYPE).forEach(l =>
+    l.leafletLayer.eachLayer(sub => {
+      if (_standHighlight.has(sub.feature?.properties?.standNo) && sub.getBounds) {
+        try { bounds.extend(sub.getBounds()); } catch {}
+      }
+    }));
+  if (bounds.isValid()) map.fitBounds(bounds, { padding: [50, 50] });
+}
+
+function clearHighlight() {
+  _standHighlight = null;
+  restyleForest();
+  document.getElementById('clear-highlight').hidden = true;
+}
+
+document.getElementById('clear-highlight').addEventListener('click', clearHighlight);
 
 // ── WFS GetCapabilities ──────────────────────────────────────
 document.getElementById('btn-load-caps').addEventListener('click', loadCapabilities);
