@@ -98,6 +98,7 @@ document.querySelectorAll('.basemap-btn').forEach(btn => {
     Object.values(basemaps).forEach(l => map.removeLayer(l));
     basemaps[name].addTo(map);
     state.layers.forEach(l => { if (l.visible) l.leafletLayer.addTo(map); });
+    applyLayerOrder();
     document.querySelectorAll('.basemap-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
   });
@@ -123,6 +124,13 @@ document.getElementById('close-report').addEventListener('click', () => {
 document.getElementById('btn-print-report').addEventListener('click', () => window.print());
 document.getElementById('report-backdrop').addEventListener('click', e => {
   if (e.target === e.currentTarget) e.currentTarget.hidden = true;
+});
+// Clicking a label-area bar zooms to that label on the map.
+document.getElementById('report-body').addEventListener('click', e => {
+  const row = e.target.closest('[data-zoom-layer]');
+  if (!row) return;
+  document.getElementById('report-backdrop').hidden = true;
+  zoomToLayer(row.dataset.zoomLayer);
 });
 
 // ── Analysis modal ───────────────────────────────────────────
@@ -275,8 +283,43 @@ function openReport() {
       </div>`;
   }).join('');
 
-  body.innerHTML = summaryHtml + kmzHtml + labelsHtml;
+  body.innerHTML = summaryHtml + labelAreaSummaryHtml() + kmzHtml + labelsHtml;
   document.getElementById('report-backdrop').hidden = false;
+}
+
+// Area assigned to each label (e.g. who farms which fields).
+function labelAreaSummaryHtml() {
+  const labels = state.layers.filter(l => l.type === 'Label');
+  if (!labels.length) return '';
+
+  const rows = labels.map(l => {
+    const polys = l.leafletLayer.toGeoJSON().features
+      .filter(f => f.geometry && /Polygon/.test(f.geometry.type));
+    const ha = polys.reduce((s, f) => s + turf.area(f), 0) / 10_000;
+    return { id: l.id, name: l.name, color: l.color, ha, count: polys.length };
+  }).sort((a, b) => b.ha - a.ha);
+
+  const total = rows.reduce((s, r) => s + r.ha, 0);
+  const max = Math.max(1, ...rows.map(r => r.ha));
+
+  return `
+    <div class="report-subtitle">Areal per label</div>
+    <div class="analysis-bars">
+      ${rows.map(r => `
+        <div class="analysis-bar-row" data-zoom-layer="${r.id}" title="Zooma till ${escHtml(r.name)}">
+          <div class="analysis-bar-label">
+            <span class="label-dot" style="background:${r.color}"></span>${escHtml(r.name)}
+            <span class="label-count">${r.count} fält</span>
+          </div>
+          <div class="analysis-bar-track"><div class="analysis-bar-fill" style="width:${(r.ha / max) * 100}%;background:${r.color}"></div></div>
+          <div class="analysis-bar-value">${r.ha.toLocaleString(undefined, { maximumFractionDigits: 1 })} ha</div>
+          <div class="analysis-bar-pct">${total ? Math.round((r.ha / total) * 100) : 0}%</div>
+        </div>`).join('')}
+    </div>
+    <div class="report-area-row">
+      <span class="report-area-label">Totalt tilldelat</span>
+      <span class="report-area-value">${formatArea(total * 10_000)}</span>
+    </div>`;
 }
 
 // Property-wide summary block (fields + forest statistics).
@@ -450,17 +493,50 @@ function setStatus(id, text, type = 'info') {
 }
 
 // ── Layer management ─────────────────────────────────────────
+// Default stacking priority: fields/labels on top, then forest, then data.
+// Lower number = higher on the map = earlier in state.layers (index 0 = front).
+function kindPriority(kind) {
+  if (kind === 'field') return 0;
+  if (kind === 'forestStand') return 1;
+  return 2; // data
+}
+
 function addLayer({ name, type, color, leafletLayer, featureCount, wfsConfig, wmsConfig, kind, forestSummary }) {
   const id = `layer-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const k = kind || layerKind(type);
   const entry = {
     id, name, type, color, visible: true, leafletLayer, featureCount,
-    wfsConfig, wmsConfig, forestSummary, kind: kind || layerKind(type),
+    wfsConfig, wmsConfig, forestSummary, kind: k,
   };
-  state.layers.push(entry);
+  // Insert at the bottom of its priority band (keeps fields above forest
+  // above data by default, while respecting any manual ordering).
+  let idx = state.layers.findIndex(l => kindPriority(l.kind) > kindPriority(k));
+  if (idx === -1) idx = state.layers.length;
+  state.layers.splice(idx, 0, entry);
   leafletLayer.addTo(map);
+  applyLayerOrder();
   renderLayerList();
   updateLayerCount();
   return entry;
+}
+
+// Re-apply map stacking so state.layers order (index 0 = front) is honoured.
+function applyLayerOrder() {
+  for (let i = state.layers.length - 1; i >= 0; i--) {
+    const l = state.layers[i];
+    if (l.visible && l.leafletLayer.bringToFront) l.leafletLayer.bringToFront();
+  }
+}
+
+// Move a layer up (toward front) or down (toward back) in the stack.
+function moveLayer(id, dir) {
+  const i = state.layers.findIndex(l => l.id === id);
+  if (i === -1) return;
+  const j = i + dir;
+  if (j < 0 || j >= state.layers.length) return;
+  [state.layers[i], state.layers[j]] = [state.layers[j], state.layers[i]];
+  applyLayerOrder();
+  renderLayerList();
 }
 
 function removeLayer(id) {
@@ -478,6 +554,7 @@ function toggleLayerVisibility(id) {
   entry.visible = !entry.visible;
   if (entry.visible) {
     entry.leafletLayer.addTo(map);
+    applyLayerOrder();
   } else {
     map.removeLayer(entry.leafletLayer);
   }
@@ -523,25 +600,18 @@ function renderLayerList() {
     ul.innerHTML = '<li class="layer-list-empty">No layers loaded yet</li>';
     return;
   }
-  const kindOf       = l => l.kind || layerKind(l.type);
-  const fieldLayers  = state.layers.filter(l => kindOf(l) === 'field');
-  const forestLayers = state.layers.filter(l => kindOf(l) === 'forestStand');
-  const dataLayers   = state.layers.filter(l => kindOf(l) === 'data');
-
-  const renderGroup = (title, layers) => {
-    if (!layers.length) return '';
-    return `<li class="layer-group-header">${title}</li>` + layers.map(layerItemHtml).join('');
-  };
-
-  ul.innerHTML =
-    renderGroup('Fields &amp; Boundaries', fieldLayers) +
-    renderGroup('Forest Stands', forestLayers) +
-    renderGroup('WMS / WFS Data Layers', dataLayers);
+  // Flat, ordered list: top row = front on the map. Reorder with ▲/▼.
+  ul.innerHTML = state.layers.map((l, i) =>
+    layerItemHtml(l, i === 0, i === state.layers.length - 1)).join('');
 }
 
-function layerItemHtml(l) {
+function layerItemHtml(l, isFirst, isLast) {
   return `
     <li class="layer-item" data-id="${l.id}">
+      <div class="layer-reorder">
+        <button class="btn-reorder" data-action="up" data-id="${l.id}" title="Flytta uppåt (fram)" ${isFirst ? 'disabled' : ''}>▲</button>
+        <button class="btn-reorder" data-action="down" data-id="${l.id}" title="Flytta nedåt (bak)" ${isLast ? 'disabled' : ''}>▼</button>
+      </div>
       ${layerSwatchHtml(l)}
       <div class="layer-item-info">
         <div class="layer-item-name" title="${l.name}">${l.name}</div>
@@ -597,6 +667,8 @@ document.getElementById('layer-list').addEventListener('click', e => {
   if (action === 'vis')    toggleLayerVisibility(id);
   if (action === 'zoom')   zoomToLayer(id);
   if (action === 'remove') removeLayer(id);
+  if (action === 'up')     moveLayer(id, -1);
+  if (action === 'down')   moveLayer(id, +1);
 });
 
 // ── Feature info panel ───────────────────────────────────────
