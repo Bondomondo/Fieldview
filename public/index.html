@@ -197,6 +197,10 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
             Share
           </button>
+          <button class="btn btn-ghost btn-sm label-io-btn" id="btn-open-api" title="API-åtkomst" hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+            API
+          </button>
           <input type="file" id="label-file-input" accept=".json" hidden />
         </div>
       </div>
@@ -367,6 +371,48 @@
         <button id="btn-save-workspace" class="btn btn-accent btn-sm">Save</button>
       </div>
       <div id="workspace-list"><p class="workspace-empty">No saved workspaces yet.</p></div>
+    </div>
+  </div>
+</div>
+
+<!-- API access modal -->
+<div class="modal-backdrop" id="api-backdrop" hidden>
+  <div class="modal modal-wide">
+    <div class="modal-header">
+      <h3>API-åtkomst</h3>
+      <button class="btn-close" id="btn-close-api">✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="panel-hint">
+        Hämta data om <strong>vem som brukar vad</strong> programmatiskt. API:et läser din
+        <strong>senast sparade arbetsyta</strong> (molnsparning) — spara en arbetsyta först.
+        Autentisera med en API-nyckel i headern <code>X-API-Key</code>.
+      </p>
+
+      <div class="api-section">
+        <div class="input-row mb-2">
+          <input id="api-key-label" type="text" placeholder="Namn på nyckeln (t.ex. 'Gårdssystem')" maxlength="80" style="flex:1" />
+          <button id="btn-create-key" class="btn btn-accent btn-sm">Skapa nyckel</button>
+        </div>
+        <div id="api-new-key" class="api-new-key" hidden>
+          <div class="api-new-key-warn">Kopiera nyckeln nu — den visas bara denna gång.</div>
+          <div class="input-row">
+            <input id="api-new-key-value" type="text" readonly style="flex:1;font-family:monospace;font-size:12px" />
+            <button id="btn-copy-key" class="btn btn-ghost btn-sm">Kopiera</button>
+          </div>
+        </div>
+        <div id="api-key-list" class="api-key-list"></div>
+      </div>
+
+      <div class="api-section">
+        <div class="api-section-title">Endpoints</div>
+        <div id="api-endpoints" class="api-endpoints"></div>
+      </div>
+
+      <div class="api-section">
+        <div class="api-section-title">Exempel (curl)</div>
+        <pre id="api-curl" class="api-curl"></pre>
+      </div>
     </div>
   </div>
 </div>
