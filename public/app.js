@@ -1672,6 +1672,7 @@ function handleAuthChange(user) {
   document.getElementById('user-chip').hidden           = !user;
   document.getElementById('btn-open-workspaces').hidden = !user;
   document.getElementById('btn-open-share').hidden      = !user;
+  document.getElementById('btn-open-api').hidden        = !user;
   if (user) {
     document.getElementById('user-name').textContent = user.displayName ?? user.email;
     document.getElementById('user-avatar').src       = user.photoURL ?? '';
@@ -1950,6 +1951,111 @@ async function maybeLoadSharedMap() {
     history.replaceState(null, '', window.location.pathname);
   } catch (err) {
     console.error('[shared map]', err);
+  }
+}
+
+// ── API access (keys + docs) ─────────────────────────────────
+async function authedFetch(path, opts = {}) {
+  const user = firebase.auth().currentUser;
+  if (!user) throw new Error('Not signed in');
+  const token = await user.getIdToken();
+  const headers = { Authorization: `Bearer ${token}`, ...(opts.headers || {}) };
+  if (opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+  return fetch(path, { ...opts, headers });
+}
+
+document.getElementById('btn-open-api').addEventListener('click', openApiModal);
+document.getElementById('btn-close-api').addEventListener('click', () => {
+  document.getElementById('api-backdrop').hidden = true;
+});
+document.getElementById('api-backdrop').addEventListener('click', e => {
+  if (e.target === e.currentTarget) e.currentTarget.hidden = true;
+});
+document.getElementById('btn-create-key').addEventListener('click', handleCreateKey);
+document.getElementById('btn-copy-key').addEventListener('click', () => {
+  const i = document.getElementById('api-new-key-value');
+  navigator.clipboard.writeText(i.value)
+    .then(() => toast('Nyckel kopierad', 'success'))
+    .catch(() => { i.select(); document.execCommand('copy'); toast('Nyckel kopierad', 'success'); });
+});
+document.getElementById('api-key-list').addEventListener('click', e => {
+  const btn = e.target.closest('[data-revoke]');
+  if (btn) handleRevokeKey(btn.dataset.revoke);
+});
+
+async function openApiModal() {
+  document.getElementById('api-new-key').hidden = true;
+  renderApiEndpoints();
+  document.getElementById('api-backdrop').hidden = false;
+  await refreshApiKeys();
+}
+
+function renderApiEndpoints() {
+  const base = window.location.origin;
+  const rows = [
+    ['GET', '/api/labels', 'Vem brukar vad (JSON) — areal per label + fält'],
+    ['GET', '/api/labels.geojson', 'Samma som GeoJSON (ett objekt per fält)'],
+    ['GET', '/api/workspaces', 'Lista dina sparade arbetsytor (id, namn)'],
+  ];
+  document.getElementById('api-endpoints').innerHTML = rows.map(([m, p, d]) =>
+    `<div class="api-endpoint"><span class="api-method">${m}</span><code>${base}${p}</code><span class="api-endpoint-desc">${d}</span></div>`).join('');
+  document.getElementById('api-curl').textContent =
+    `curl -H "X-API-Key: DIN_NYCKEL" \\\n  ${base}/api/labels`;
+}
+
+async function refreshApiKeys() {
+  const el = document.getElementById('api-key-list');
+  el.innerHTML = '<p class="workspace-empty">Laddar…</p>';
+  try {
+    const r = await authedFetch('/api/keys');
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+    const { keys } = await r.json();
+    if (!keys.length) { el.innerHTML = '<p class="workspace-empty">Inga nycklar ännu.</p>'; return; }
+    el.innerHTML = keys.map(k => {
+      const created = k.createdAt ? new Date(k.createdAt).toLocaleDateString() : '–';
+      const used = k.lastUsedAt ? new Date(k.lastUsedAt).toLocaleDateString() : 'aldrig';
+      return `<div class="api-key-row">
+        <div class="api-key-info">
+          <span class="api-key-name">${escHtml(k.label)}</span>
+          <span class="api-key-meta">Skapad ${created} · Använd ${used}</span>
+        </div>
+        <button class="btn btn-danger btn-sm" data-revoke="${escHtml(k.id)}">Återkalla</button>
+      </div>`;
+    }).join('');
+  } catch (err) {
+    el.innerHTML = `<p class="workspace-empty">${escHtml(err.message)}</p>`;
+  }
+}
+
+async function handleCreateKey() {
+  const label = document.getElementById('api-key-label').value.trim();
+  const btn = document.getElementById('btn-create-key');
+  btn.disabled = true;
+  try {
+    const r = await authedFetch('/api/keys', { method: 'POST', body: JSON.stringify({ label }) });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+    const { key } = await r.json();
+    document.getElementById('api-new-key-value').value = key;
+    document.getElementById('api-new-key').hidden = false;
+    document.getElementById('api-key-label').value = '';
+    toast('Nyckel skapad', 'success');
+    refreshApiKeys();
+  } catch (err) {
+    toast(`Kunde inte skapa nyckel: ${err.message}`, 'error', 6000);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function handleRevokeKey(id) {
+  if (!confirm('Återkalla denna nyckel? System som använder den slutar fungera.')) return;
+  try {
+    const r = await authedFetch(`/api/keys/${id}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    toast('Nyckel återkallad', 'success');
+    refreshApiKeys();
+  } catch (err) {
+    toast(`Kunde inte återkalla: ${err.message}`, 'error');
   }
 }
 

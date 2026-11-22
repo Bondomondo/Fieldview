@@ -1209,6 +1209,25 @@ html, body {
 .label-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; flex-shrink: 0; }
 .label-count { font-size: 11px; color: var(--text-muted); margin-left: 6px; }
 
+/* ── API access modal ──────────────────────────────────────── */
+.modal-wide { max-width: 640px; width: 92vw; }
+.api-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.api-section:first-of-type { border-top: none; padding-top: 0; margin-top: 10px; }
+.api-section-title { font-size: 12px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px; }
+.api-new-key { margin: 10px 0; padding: 10px; background: var(--bg-elevated); border: 1px solid var(--accent-amber); border-radius: var(--radius-sm); }
+.api-new-key-warn { font-size: 12px; color: var(--accent-amber); margin-bottom: 6px; }
+.api-key-list { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.api-key-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.api-key-info { display: flex; flex-direction: column; min-width: 0; }
+.api-key-name { font-size: 13px; font-weight: 500; color: var(--text-primary); }
+.api-key-meta { font-size: 11px; color: var(--text-muted); }
+.api-endpoints { display: flex; flex-direction: column; gap: 6px; }
+.api-endpoint { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+.api-method { font-size: 10px; font-weight: 700; color: var(--accent-green); background: rgba(76,175,113,.12); padding: 1px 6px; border-radius: 4px; }
+.api-endpoint code { color: var(--text-primary); font-size: 12px; word-break: break-all; }
+.api-endpoint-desc { color: var(--text-muted); flex-basis: 100%; }
+.api-curl { background: var(--bg-base); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px; font-size: 12px; color: var(--text-secondary); white-space: pre-wrap; word-break: break-all; margin: 0; }
+
 /* ── Layer reorder controls ────────────────────────────────── */
 .layer-reorder { display: flex; flex-direction: column; gap: 1px; flex-shrink: 0; }
 .btn-reorder {

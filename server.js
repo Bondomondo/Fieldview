@@ -10,6 +10,11 @@
  *   PROXY_CREDENTIALS – JSON array of per-host credentials:
  *     [{ "host": "example.com", "username": "user", "password": "pass" }]
  *
+ *   FIREBASE_SERVICE_ACCOUNT – JSON service-account key (single line) that
+ *     enables the data REST API under /api (api-key authenticated reads of
+ *     who-farms-what). Without it the proxy and site still work; the data
+ *     API returns 503.
+ *
  * Usage:  node server.js          (default port 3000)
  *         PORT=8080 node server.js
  */
@@ -150,6 +155,12 @@ app.get('/api/config', (req, res) => {
     appId:             process.env.FIREBASE_APP_ID              ?? '',
   });
 });
+
+// ── REST API (property / who-farms-what) ─────────────────────
+// Mounted after the specific /api/config and /api/send-share-email handlers
+// above so those keep precedence; this router serves /api/keys, /api/labels,
+// /api/labels.geojson, /api/workspaces and /api/status.
+app.use('/api', require('./api/routes'));
 
 // ── Start ────────────────────────────────────────────────────
 app.listen(PORT, () => {
