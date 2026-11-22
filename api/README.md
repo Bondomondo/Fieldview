@@ -36,11 +36,22 @@ the app never reads it; only the Admin SDK does).
 | `GET`  | `/api/keys` | Google token | List your keys (no plaintext) |
 | `DELETE` | `/api/keys/:id` | Google token | Revoke a key |
 | `GET`  | `/api/workspaces` | API key | `{ workspaces: [{ id, name, savedAt }] }` |
+| `GET`  | `/api/labels/names` | API key | List labels only (name, colour, area, field count) |
 | `GET`  | `/api/labels` | API key | Who-farms-what as JSON (see below) |
 | `GET`  | `/api/labels.geojson` | API key | Same data as GeoJSON (one feature per field) |
 
-`/api/labels` and `/api/labels.geojson` accept an optional `?workspace=<id or name>`
-(defaults to the most recently saved workspace).
+All three label endpoints accept:
+
+- `?workspace=<id or name>` — defaults to the most recently saved workspace.
+- `?label=<name>` or `?label=<a>,<b>` — keep only these labels (case-insensitive).
+
+Examples:
+
+```
+/api/labels/names
+/api/labels?label=Kopparfall
+/api/labels.geojson?label=Kopparfall,Undsjö
+```
 
 ### `GET /api/labels` response
 
