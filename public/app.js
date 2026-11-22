@@ -1993,14 +1993,18 @@ async function openApiModal() {
 function renderApiEndpoints() {
   const base = window.location.origin;
   const rows = [
+    ['GET', '/api/labels/names', 'Lista labels (namn, färg, areal, antal fält)'],
     ['GET', '/api/labels', 'Vem brukar vad (JSON) — areal per label + fält'],
     ['GET', '/api/labels.geojson', 'Samma som GeoJSON (ett objekt per fält)'],
     ['GET', '/api/workspaces', 'Lista dina sparade arbetsytor (id, namn)'],
   ];
   document.getElementById('api-endpoints').innerHTML = rows.map(([m, p, d]) =>
-    `<div class="api-endpoint"><span class="api-method">${m}</span><code>${base}${p}</code><span class="api-endpoint-desc">${d}</span></div>`).join('');
+    `<div class="api-endpoint"><span class="api-method">${m}</span><code>${base}${p}</code><span class="api-endpoint-desc">${d}</span></div>`).join('')
+    + `<div class="api-endpoint-desc" style="margin-top:6px">Filtrera: <code>?label=Kopparfall</code> eller <code>?label=Kopparfall,Undsjö</code> · välj arbetsyta: <code>?workspace=Namn</code></div>`;
   document.getElementById('api-curl').textContent =
-    `curl -H "X-API-Key: DIN_NYCKEL" \\\n  ${base}/api/labels`;
+    `# alla labels\ncurl -H "X-API-Key: DIN_NYCKEL" ${base}/api/labels\n\n`
+    + `# bara namnen\ncurl -H "X-API-Key: DIN_NYCKEL" ${base}/api/labels/names\n\n`
+    + `# en specifik brukare\ncurl -H "X-API-Key: DIN_NYCKEL" "${base}/api/labels?label=Kopparfall"`;
 }
 
 async function refreshApiKeys() {

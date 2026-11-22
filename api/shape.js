@@ -40,12 +40,25 @@ function fieldId(props) {
   return props.id ?? props.objektidentitet ?? props.objektid ?? null;
 }
 
+/** Normalise a `?label=a,b` query into a lower-cased name list (or null). */
+function parseLabelFilter(q) {
+  if (q == null) return null;
+  const arr = String(q).split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  return arr.length ? arr : null;
+}
+
+function labelMatches(name, filter) {
+  return !filter || filter.includes(String(name).toLowerCase());
+}
+
 /**
  * Who-farms-what as structured JSON.
+ * @param {Array} layers  serialized layers from a stored workspace
+ * @param {string[]|null} filter  lower-cased label names to keep (or null for all)
  * @returns {{ labels, totalAreaHa, totalFields }}
  */
-function extractLabels(layers) {
-  const labelLayers = (layers || []).filter(l => l && l.type === 'Label');
+function extractLabels(layers, filter = null) {
+  const labelLayers = (layers || []).filter(l => l && l.type === 'Label' && labelMatches(l.name, filter));
 
   const labels = labelLayers.map(l => {
     const fields = (l.features || [])
@@ -74,9 +87,9 @@ function extractLabels(layers) {
  * Who-farms-what as a GeoJSON FeatureCollection — one feature per field,
  * tagged with its label (brukare), label colour and area.
  */
-function toGeoJSON(layers) {
+function toGeoJSON(layers, filter = null) {
   const features = [];
-  for (const l of (layers || []).filter(x => x && x.type === 'Label')) {
+  for (const l of (layers || []).filter(x => x && x.type === 'Label' && labelMatches(x.name, filter))) {
     for (const f of (l.features || [])) {
       if (!f || !f.geometry) continue;
       features.push({
@@ -94,4 +107,4 @@ function toGeoJSON(layers) {
   return { type: 'FeatureCollection', features };
 }
 
-module.exports = { parseLayers, extractLabels, toGeoJSON, featureAreaHa };
+module.exports = { parseLayers, extractLabels, toGeoJSON, featureAreaHa, parseLabelFilter };

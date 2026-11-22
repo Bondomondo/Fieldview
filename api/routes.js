@@ -88,27 +88,45 @@ router.get('/workspaces', requireApiKey, async (req, res) => {
   });
 });
 
-// Who farms what — structured JSON
+// List the labels (brukare) only — names, colour, area, field count.
+router.get('/labels/names', requireApiKey, async (req, res) => {
+  const ws = await loadWorkspace(req.uid, req.query.workspace);
+  if (!ws) return res.status(404).json({ error: 'No saved workspace found. Save a workspace to the cloud first.' });
+  const layers = shape.parseLayers(ws.data);
+  const filter = shape.parseLabelFilter(req.query.label);
+  const { labels, totalAreaHa, totalFields } = shape.extractLabels(layers, filter);
+  res.json({
+    workspace: { id: ws.id, name: ws.data.name },
+    generatedAt: new Date().toISOString(),
+    totalAreaHa, totalFields,
+    labels: labels.map(({ fields, ...rest }) => rest),   // drop per-field detail
+  });
+});
+
+// Who farms what — structured JSON. Optional ?label=Name or ?label=A,B
 router.get('/labels', requireApiKey, async (req, res) => {
   const ws = await loadWorkspace(req.uid, req.query.workspace);
   if (!ws) return res.status(404).json({ error: 'No saved workspace found. Save a workspace to the cloud first.' });
   const layers = shape.parseLayers(ws.data);
-  const { labels, totalAreaHa, totalFields } = shape.extractLabels(layers);
+  const filter = shape.parseLabelFilter(req.query.label);
+  const { labels, totalAreaHa, totalFields } = shape.extractLabels(layers, filter);
   res.json({
     workspace: { id: ws.id, name: ws.data.name },
     generatedAt: new Date().toISOString(),
+    filter: filter || null,
     totalAreaHa, totalFields,
     labels,
   });
 });
 
-// Who farms what — GeoJSON (one feature per field)
+// Who farms what — GeoJSON (one feature per field). Optional ?label=A,B
 router.get('/labels.geojson', requireApiKey, async (req, res) => {
   const ws = await loadWorkspace(req.uid, req.query.workspace);
   if (!ws) return res.status(404).json({ error: 'No saved workspace found. Save a workspace to the cloud first.' });
   const layers = shape.parseLayers(ws.data);
+  const filter = shape.parseLabelFilter(req.query.label);
   res.setHeader('Content-Type', 'application/geo+json');
-  res.json(shape.toGeoJSON(layers));
+  res.json(shape.toGeoJSON(layers, filter));
 });
 
 // Simple health/capability probe (no auth) — handy for integration setup.
